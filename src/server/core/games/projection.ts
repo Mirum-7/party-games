@@ -7,6 +7,10 @@ import { GameCommandError, invalidInput } from "@/server/core/games/errors";
 import type { GameDefinition, GameProjectedState } from "@/server/core/games/types";
 import type { Capabilities, GameStateResponse } from "@/shared/contracts/game";
 
+// Защита от некорректного UUID зрителя: fail-closed до обращения к БД, иначе
+// валидация Prisma бросит P2007 вместо доменной 401.
+const VIEWER_UUID_PATTERN = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+
 // Персональная проекция состояния для одного viewer. Чтение выполняется в
 // согласованной repeatable-read транзакции без блокировки Game: проекция не
 // изменяет состояние. Core читает только свои таблицы (Game, Player,
@@ -21,6 +25,9 @@ export async function getGameStateForViewer(input: {
   const code = normalizeRoomCode(input.code);
   if (!isValidRoomCode(code)) {
     throw invalidInput("code", "Код комнаты состоит из шести символов без I, O, 0 и 1");
+  }
+  if (!VIEWER_UUID_PATTERN.test(input.viewerPlayerId)) {
+    throw new GameCommandError("UNAUTHENTICATED", 401, "Сессия игрока не найдена");
   }
 
   return prisma.$transaction(

@@ -238,6 +238,12 @@ describe("getGameState: доступ", () => {
     await expectGameError(getGameState(room.code, randomUUID()), "UNAUTHENTICATED", 401);
   });
 
+  test("некорректный UUID зрителя — UNAUTHENTICATED 401, fail-closed без ошибки Prisma", async () => {
+    const room = await createRoom();
+    const error = await expectGameError(getGameState(room.code, "not-a-uuid"), "UNAUTHENTICATED", 401);
+    expect(error.message).toBe("Сессия игрока не найдена");
+  });
+
   test("зритель из другой комнаты — FORBIDDEN 403", async () => {
     const room = await createRoom();
     const other = await createRoom();
