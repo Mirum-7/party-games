@@ -36,11 +36,14 @@ src/
 | `DATABASE_URL` | Да | Строка подключения PostgreSQL |
 | `SESSION_PASSWORD` | Да | Секрет `iron-session`, не менее 32 символов |
 | `APP_ORIGIN` | Да | Доверенный origin для проверки mutation |
+| `TRUST_PROXY` | Нет | `true` — доверять `X-Forwarded-For` при определении IP для rate limiting; по умолчанию заголовок игнорируется |
 | `TEST_DATABASE_URL` | Для integration-тестов | Одноразовая локальная БД, имя оканчивается на `_test` |
 | `E2E_DATABASE_URL` | Для E2E-тестов | Одноразовая локальная БД, имя оканчивается на `_e2e` |
 | `NODE_ENV` | Управляется запуском | Режим production/development |
 
 Локальный `APP_ORIGIN`: `http://localhost:3000`. Секреты не получают префикс `NEXT_PUBLIC_` и не коммитятся. В репозиторий добавляется только `.env.example` с безопасными fictitious-значениями.
+
+`TRUST_PROXY` включается только при развёртывании за доверенным reverse proxy, который перезаписывает присылаемый клиентом `X-Forwarded-For` (первым адресом должен оставаться реальный IP клиента). Без этого IP для rate limiting определяется по стабильному локальному fallback, а подделанный `X-Forwarded-For` игнорируется.
 
 ## 3. Package scripts
 
