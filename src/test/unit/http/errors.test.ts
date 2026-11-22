@@ -73,6 +73,34 @@ describe("handleApi", () => {
     expect(await response.json()).toEqual({ ok: true });
   });
 
+  test("setCacheControl: false сохраняет собственные заголовки успешного ответа", async () => {
+    const response = await handleApi(
+      async () =>
+        new Response("retry: 3000\n\n", {
+          headers: {
+            "Content-Type": "text/event-stream",
+            "Cache-Control": "no-cache, no-transform",
+            Connection: "keep-alive",
+            "X-Accel-Buffering": "no",
+          },
+        }),
+      { setCacheControl: false },
+    );
+    expect(response.headers.get("Cache-Control")).toBe("no-cache, no-transform");
+    expect(response.headers.get("Content-Type")).toBe("text/event-stream");
+  });
+
+  test("setCacheControl: false не отключает no-store у JSON-ошибок", async () => {
+    const response = await handleApi(
+      async () => {
+        throw new ApiError("UNAUTHENTICATED", "Сессия истекла");
+      },
+      { setCacheControl: false },
+    );
+    expect(response.status).toBe(401);
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
+  });
+
   test("ApiError превращается в документированный статус и формат без утечки internals", async () => {
     const response = await handleApi(async () => {
       throw new ApiError("UNAUTHENTICATED", "Сессия истекла");
