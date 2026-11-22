@@ -1,0 +1,25 @@
+# Dependencies
+node_modules/
+
+# Next.js
+.next/
+out/
+next-env.d.ts
+
+# Generated Prisma Client
+src/generated/
+
+# TypeScript
+*.tsbuildinfo
+
+# Environment — в репозитории только .env.example
+.env
+.env.*
+!.env.example
+
+# Playwright
+playwright-report/
+test-results/
+
+# OS / editor
+.DS_Store
