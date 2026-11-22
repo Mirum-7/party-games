@@ -55,7 +55,7 @@ export function gameSyncReducer(
       return { ...state, mutationPending: true, errorMessage: null };
     case "mutationSucceeded":
       if (action.game.game.revision < state.game.game.revision) {
-        return state;
+        return { ...state, mutationPending: false, errorMessage: null };
       }
       return {
         ...state,

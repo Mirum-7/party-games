@@ -1,6 +1,12 @@
 import { describe, expect, test } from "bun:test";
 
-import type { GameStateResponse } from "@/shared/contracts/game";
+import type {
+  GamePhase,
+  GameStateResponse,
+  HintItem,
+  ResultItem,
+  SetupState,
+} from "@/shared/contracts/game";
 import {
   createGameSyncState,
   gameSyncReducer,
@@ -8,19 +14,51 @@ import {
   type GameSyncState,
 } from "@/components/game/sync-reducer";
 
-function makeGameState(revision: number): GameStateResponse {
+function makeGameState(revision: number, phase: GamePhase = "PLAYING"): GameStateResponse {
+  const setup: SetupState | null =
+    phase === "ASSIGNING_WORDS"
+      ? {
+          target: { id: "player-2", name: "Петя" },
+          targetHidden: false,
+          word: "молния",
+        }
+      : null;
+  const hints: HintItem[] | null =
+    phase === "PLAYING" || phase === "FINISHED"
+      ? [
+          {
+            assignmentId: "assignment-1",
+            author: { id: "player-3", name: "Ваня" },
+            target: { id: "player-1", name: "Маша" },
+            word: "компас",
+            wordHidden: false,
+          },
+        ]
+      : null;
+  const results: ResultItem[] | null =
+    phase === "FINISHED"
+      ? [
+          {
+            playerId: "player-2",
+            name: "Петя",
+            place: 1,
+            score: 3,
+            durationMs: 12000,
+          },
+        ]
+      : null;
   return {
     game: {
       code: "K7Q2",
       type: "WORD_CHAIN",
-      phase: "PLAYING",
+      phase,
       revision,
       minPlayers: 3,
       maxPlayers: 12,
       settings: { hideTargetNamesDuringSetup: true },
       startedAt: "2026-11-22T10:00:00.000Z",
-      playingStartedAt: "2026-11-22T10:05:00.000Z",
-      finishedAt: null,
+      playingStartedAt: phase === "PLAYING" || phase === "FINISHED" ? "2026-11-22T10:05:00.000Z" : null,
+      finishedAt: phase === "FINISHED" ? "2026-11-22T10:20:00.000Z" : null,
     },
     viewer: { playerId: "player-1" },
     players: [
@@ -49,29 +87,9 @@ function makeGameState(revision: number): GameStateResponse {
         hasGuessed: false,
       },
     ],
-    setup: {
-      target: { id: "player-2", name: "Петя" },
-      targetHidden: false,
-      word: "молния",
-    },
-    hints: [
-      {
-        assignmentId: "assignment-1",
-        author: { id: "player-3", name: "Ваня" },
-        target: { id: "player-1", name: "Маша" },
-        word: "компас",
-        wordHidden: false,
-      },
-    ],
-    results: [
-      {
-        playerId: "player-2",
-        name: "Петя",
-        place: 1,
-        score: 3,
-        durationMs: 12000,
-      },
-    ],
+    setup,
+    hints,
+    results,
     capabilities: {
       canEditSettings: false,
       canManagePlayers: false,
@@ -216,20 +234,38 @@ describe("gameSyncReducer", () => {
     expect(next.errorMessage).toBeNull();
   });
 
-  test("mutationSucceeded отбрасывает устаревший DTO и возвращает тот же объект состояния", () => {
+  test("mutationSucceeded с равной ревизией применяет DTO и снимает pending и ошибку", () => {
     const state: GameSyncState = {
-      game: makeGameState(5),
+      game: makeGameState(3),
       connectionStatus: "connected",
       mutationPending: true,
       errorMessage: null,
+    };
+    const equal = makeGameState(3, "FINISHED");
+
+    const next = gameSyncReducer(state, { type: "mutationSucceeded", game: equal });
+
+    expect(next.game).toBe(equal);
+    expect(next.mutationPending).toBe(false);
+    expect(next.errorMessage).toBeNull();
+  });
+
+  test("mutationSucceeded с устаревшей ревизией сохраняет игру и статус, но снимает pending и ошибку", () => {
+    const game = makeGameState(5);
+    const state: GameSyncState = {
+      game,
+      connectionStatus: "reconnecting",
+      mutationPending: true,
+      errorMessage: "Предыдущий сбой",
     };
     const stale = makeGameState(4);
 
     const next = gameSyncReducer(state, { type: "mutationSucceeded", game: stale });
 
-    expect(next).toBe(state);
-    expect(next.mutationPending).toBe(true);
-    expect(next.game.game.revision).toBe(5);
+    expect(next.game).toBe(game);
+    expect(next.connectionStatus).toBe("reconnecting");
+    expect(next.mutationPending).toBe(false);
+    expect(next.errorMessage).toBeNull();
   });
 
   test("mutationFailed снимает pending, сохраняет последнее удачное состояние и сообщает ошибку", () => {
