@@ -86,11 +86,18 @@ export function internalErrorResponse(correlationId: string): Response {
 
 type ApiHandler = () => Promise<Response>;
 
-export async function handleApi(handler: ApiHandler, options: { correlationId?: string } = {}): Promise<Response> {
+export async function handleApi(
+  handler: ApiHandler,
+  options: { correlationId?: string; setCacheControl?: boolean } = {},
+): Promise<Response> {
   const correlationId = options.correlationId ?? newCorrelationId();
   try {
     const response = await handler();
-    response.headers.set("Cache-Control", "no-store");
+    // SSE-ответы несут собственные заголовки кеширования; флаг нужен,
+    // чтобы no-store не перезаписывал Cache-Control: no-cache, no-transform.
+    if (options.setCacheControl ?? true) {
+      response.headers.set("Cache-Control", "no-store");
+    }
     return response;
   } catch (error) {
     if (error instanceof ApiError) {

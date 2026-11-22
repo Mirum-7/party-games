@@ -1,15 +1,34 @@
 import type { GameRealtime } from "./types";
 
+export type RealtimeErrorLog = (line: string) => void;
+
+const logListenerError: RealtimeErrorLog = (line) => {
+  console.error(line);
+};
+
 // In-memory реализация для одного процесса Next.js. Слушатели хранятся в Map
-// по gameId; subscribe возвращает cleanup, который удаляет слушателя.
+// по gameId; subscribe возвращает cleanup, который удаляет слушателя. Один
+// падающий слушатель не должен ломать остальных и вылетать из publish,
+// который вызывается после commit команды.
 export class InMemoryGameRealtime implements GameRealtime {
   private readonly listeners = new Map<string, Set<(revision: number) => void>>();
+
+  constructor(private readonly logError: RealtimeErrorLog = logListenerError) {}
 
   publish(gameId: string, revision: number): void {
     const listeners = this.listeners.get(gameId);
     if (!listeners) return;
     for (const listener of [...listeners]) {
-      listener(revision);
+      try {
+        listener(revision);
+      } catch (error) {
+        // Санитизированная диагностика: только action/gameId/errorName —
+        // сообщение ошибки и тело не логируются.
+        const errorName = error instanceof Error ? error.name : "UnknownError";
+        this.logError(
+          JSON.stringify({ event: "game.realtime.listenerError", action: "publish", gameId, errorName }),
+        );
+      }
     }
   }
 
