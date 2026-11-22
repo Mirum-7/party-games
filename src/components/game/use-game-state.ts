@@ -32,9 +32,11 @@ export function useGameState(code: string, initialState: GameStateResponse): Use
     return () => controller.close();
   }, [controller]);
 
+  const getSnapshot = useCallback(() => controller.getSnapshot(), [controller]);
   const state = useSyncExternalStore(
     useCallback((onStoreChange) => controller.subscribe(onStoreChange), [controller]),
-    useCallback(() => controller.getSnapshot(), [controller]),
+    getSnapshot,
+    getSnapshot,
   );
 
   const refresh = useCallback(() => controller.refresh(), [controller]);
