@@ -7,4 +7,101 @@ datasource db {
   provider = "postgresql"
 }
 
-// Модели определяются по docs/data-model.md отдельной задачей.
+enum GameType {
+  WORD_CHAIN
+}
+
+enum GameStatus {
+  LOBBY
+  ACTIVE
+  FINISHED
+}
+
+enum WordChainPhase {
+  ASSIGNING_WORDS
+  PLAYING
+}
+
+model Game {
+  id           String     @id @default(uuid()) @db.Uuid
+  code         String     @unique @db.VarChar(6)
+  type         GameType
+  status       GameStatus
+  hostPlayerId String?    @unique @db.Uuid
+  revision     Int        @default(0)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+  startedAt    DateTime?
+  finishedAt   DateTime?
+
+  players      Player[]          @relation("GamePlayers")
+  host         Player?           @relation("GameHost", fields: [hostPlayerId], references: [id], onDelete: Restrict)
+  results      GameResult[]
+  wordChain    WordChainGame?
+  assignments  WordAssignment[]
+
+  @@map("games")
+}
+
+model Player {
+  id             String   @id @default(uuid()) @db.Uuid
+  gameId         String   @db.Uuid
+  name           String   @db.VarChar(24)
+  normalizedName String
+  isReady        Boolean  @default(false)
+  joinedAt       DateTime @default(now())
+
+  game           Game     @relation("GamePlayers", fields: [gameId], references: [id], onDelete: Cascade)
+  hostedGame     Game?    @relation("GameHost")
+  result         GameResult?
+  authoredAssignment WordAssignment? @relation("AssignmentAuthor")
+  targetedAssignment WordAssignment? @relation("AssignmentTarget")
+
+  @@unique([gameId, normalizedName])
+  @@map("players")
+}
+
+model GameResult {
+  id         String    @id @default(uuid()) @db.Uuid
+  gameId     String    @db.Uuid
+  playerId   String    @unique @db.Uuid
+  place      Int?
+  score      Int       @default(0)
+  finishedAt DateTime?
+
+  game       Game      @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  player     Player    @relation(fields: [playerId], references: [id], onDelete: Restrict)
+
+  @@unique([gameId, playerId])
+  @@unique([gameId, place])
+  @@map("game_results")
+}
+
+model WordChainGame {
+  gameId                       String          @id @db.Uuid
+  phase                        WordChainPhase?
+  hideTargetNamesDuringSetup   Boolean         @default(false)
+  playingStartedAt             DateTime?
+
+  game                         Game            @relation(fields: [gameId], references: [id], onDelete: Cascade)
+
+  @@map("word_chain_games")
+}
+
+model WordAssignment {
+  id             String    @id @default(uuid()) @db.Uuid
+  gameId         String    @db.Uuid
+  authorPlayerId String    @unique @db.Uuid
+  targetPlayerId String    @unique @db.Uuid
+  word           String?   @db.VarChar(80)
+  submittedAt    DateTime?
+  createdAt      DateTime  @default(now())
+
+  game           Game      @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  author         Player    @relation("AssignmentAuthor", fields: [authorPlayerId], references: [id], onDelete: Restrict)
+  target         Player    @relation("AssignmentTarget", fields: [targetPlayerId], references: [id], onDelete: Restrict)
+
+  @@unique([gameId, authorPlayerId])
+  @@unique([gameId, targetPlayerId])
+  @@map("word_assignments")
+}

@@ -1,5 +1,5 @@
 import "server-only";
-import { PrismaClient } from "@/generated/prisma/client";
+import { Prisma, PrismaClient } from "@/generated/prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 
 const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient };
@@ -12,6 +12,9 @@ export function createPrismaClient(): PrismaClient {
 }
 
 export const prisma = globalForPrisma.prisma ?? createPrismaClient();
+
+export { Prisma };
+export type TransactionClient = Prisma.TransactionClient;
 
 if (process.env.NODE_ENV !== "production") {
   globalForPrisma.prisma = prisma;
