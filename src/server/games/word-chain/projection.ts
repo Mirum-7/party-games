@@ -1,6 +1,8 @@
 import "server-only";
 
 import type { Game, GameResult, Player, WordAssignment, WordChainGame } from "@/generated/prisma/client";
+import type { GameProjectInput, GameProjectedState } from "@/server/core/games/types";
+import type { TransactionClient } from "@/server/db";
 import type { Capabilities, HintItem, PlayerRef, ResultItem, SetupState } from "@/shared/contracts/game";
 
 import { compareResults, getPublicPhase } from "./rules";
@@ -154,4 +156,64 @@ function assertAllWordsAssigned(assignments: readonly WordAssignment[]): void {
   for (const assignment of assignments) {
     if (assignment.word === null) throw new Error("INVALID_GAME_STATE");
   }
+}
+
+// Хук GameDefinition.project: читает только таблицы модуля (WordChainGame,
+// WordAssignment) и только то, что разрешено фазой. В ASSIGNING_WORDS —
+// собственное назначение viewer целиком плюс факты submittedAt всех авторов
+// для hasSubmittedWord; чужие слова не читаются. Секреты, которые зрителю
+// нельзя видеть, чистой проекцией не возвращаются.
+export async function projectWordChainState(
+  tx: TransactionClient,
+  input: GameProjectInput,
+): Promise<GameProjectedState> {
+  const { game, viewer } = input;
+  const wordChain = await tx.wordChainGame.findUniqueOrThrow({ where: { gameId: game.id } });
+  const phase = getPublicPhase(game.status, wordChain.phase);
+
+  let assignments: WordAssignment[] = [];
+  let submittedWordPlayerIds: string[] = [];
+  switch (phase) {
+    case "LOBBY":
+      // В лобби назначений нет: для DTO они не нужны и не читаются.
+      break;
+    case "ASSIGNING_WORDS": {
+      const [own, flags] = await Promise.all([
+        tx.wordAssignment.findFirst({ where: { gameId: game.id, authorPlayerId: viewer.id } }),
+        tx.wordAssignment.findMany({
+          where: { gameId: game.id },
+          select: { authorPlayerId: true, submittedAt: true },
+        }),
+      ]);
+      assignments = own === null ? [] : [own];
+      submittedWordPlayerIds = flags.filter((row) => row.submittedAt !== null).map((row) => row.authorPlayerId);
+      break;
+    }
+    case "PLAYING":
+    case "FINISHED":
+      assignments = await tx.wordAssignment.findMany({ where: { gameId: game.id } });
+      submittedWordPlayerIds = assignments
+        .filter((assignment) => assignment.submittedAt !== null)
+        .map((assignment) => assignment.authorPlayerId);
+      break;
+  }
+
+  const projection = projectWordChain({
+    game,
+    wordChain,
+    players: input.players,
+    viewer,
+    assignments,
+    results: input.results,
+  });
+  return {
+    phase,
+    settings: { hideTargetNamesDuringSetup: wordChain.hideTargetNamesDuringSetup },
+    playingStartedAt: wordChain.playingStartedAt,
+    setup: projection.setup,
+    hints: projection.hints,
+    results: projection.results,
+    capabilities: projection.capabilities,
+    submittedWordPlayerIds,
+  };
 }

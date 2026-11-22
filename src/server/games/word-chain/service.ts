@@ -13,6 +13,7 @@ import { isValidWord, MAX_WORD_LENGTH } from "./validation";
 import type { WordChainPhase } from "./types";
 
 import { createWordChainGame, updateWordChainSettings } from "./settings";
+import { projectWordChainState } from "./projection";
 
 // Сборка описания игры для реестра: Core вызывает хуки, не зная полей настроек
 // и правил WORD_CHAIN.
@@ -22,6 +23,7 @@ export const wordChainGameDefinition: GameDefinition = {
   maxPlayers: 12,
   createGame: createWordChainGame,
   updateSettings: updateWordChainSettings,
+  project: projectWordChainState,
 };
 
 const INVALID_CODE_MESSAGE = "Код комнаты состоит из шести символов без I, O, 0 и 1";
