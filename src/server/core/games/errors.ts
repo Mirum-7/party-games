@@ -8,7 +8,9 @@ export type GameErrorCode =
   | "PLAYER_NOT_FOUND"
   | "GAME_FULL"
   | "NAME_TAKEN"
-  | "INVALID_GAME_STATE";
+  | "INVALID_GAME_STATE"
+  | "NOT_ENOUGH_PLAYERS"
+  | "NOT_ALL_READY";
 
 export type GameErrorStatus = 400 | 401 | 403 | 404 | 409;
 

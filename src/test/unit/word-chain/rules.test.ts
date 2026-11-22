@@ -1,6 +1,13 @@
 import { describe, expect, test } from "bun:test";
 
 import {
+  generateRoomCode as generateCoreRoomCode,
+  normalizeRoomCode,
+  ROOM_CODE_ALPHABET as CORE_ROOM_CODE_ALPHABET,
+  ROOM_CODE_LENGTH as CORE_ROOM_CODE_LENGTH,
+} from "@/server/core/games/code";
+import { normalizePlayerName, playerNameKey } from "@/server/core/players/schemas";
+import {
   assertSingleCycle,
   buildCycle,
   canStart,
@@ -235,6 +242,21 @@ describe("нормализация", () => {
   test("normalizeCode: удаление пробелов и верхний регистр", () => {
     expect(normalizeCode("  ab cd\n")).toBe("ABCD");
     expect(normalizeCode("a b 2 3")).toBe("AB23");
+  });
+
+  test("нормализация имени и кода канонична в Core: обёртки совпадают с реализацией по ссылке и поведению", () => {
+    // Регрессионная проверка направления рефакторинга: дублирующая
+    // нормализация удалена из word-chain, публичные обёртки делегируют Core.
+    expect(normalizeName).toBe(normalizePlayerName);
+    expect(nameKey).toBe(playerNameKey);
+    expect(normalizeCode).toBe(normalizeRoomCode);
+    expect(generateRoomCode).toBe(generateCoreRoomCode);
+    expect(ROOM_CODE_ALPHABET).toBe(CORE_ROOM_CODE_ALPHABET);
+    expect(ROOM_CODE_LENGTH).toBe(CORE_ROOM_CODE_LENGTH);
+
+    expect(normalizeName("  Маша   и  Петя ")).toBe(normalizePlayerName("  Маша   и  Петя "));
+    expect(nameKey("  ПеТя ")).toBe(playerNameKey("  ПеТя "));
+    expect(normalizeCode("  ab cd\n")).toBe(normalizeRoomCode("  ab cd\n"));
   });
 });
 

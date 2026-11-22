@@ -1,6 +1,18 @@
+import type { RandomInt } from "@/server/core/games/code";
+import { normalizeRoomCode } from "@/server/core/games/code";
+import { normalizePlayerName, playerNameKey } from "@/server/core/players/schemas";
+
 import type { GameStatus, PublicPhase, ResultSortKey, WordChainPhase } from "./types";
 
-export type RandomInt = (maxExclusive: number) => number;
+// Каноническая нормализация имён и кодов комнаты живёт в чистых модулях Core
+// (players/schemas, games/code). word-chain импортирует Core и сохраняет свои
+// публичные имена обёртками; Core не импортирует игровые модули.
+export { generateRoomCode, ROOM_CODE_ALPHABET, ROOM_CODE_LENGTH } from "@/server/core/games/code";
+export type { RandomInt };
+
+export const normalizeName = normalizePlayerName;
+export const nameKey = playerNameKey;
+export const normalizeCode = normalizeRoomCode;
 
 export type AssignmentPair = {
   authorPlayerId: string;
@@ -9,9 +21,6 @@ export type AssignmentPair = {
 
 export const MIN_PLAYERS = 3;
 export const MAX_PLAYERS = 12;
-
-export const ROOM_CODE_LENGTH = 6;
-export const ROOM_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 
 export function buildCycle(playerIds: readonly string[], randomInt: RandomInt): AssignmentPair[] {
   if (playerIds.length < MIN_PLAYERS || playerIds.length > MAX_PLAYERS || new Set(playerIds).size !== playerIds.length) {
@@ -66,32 +75,8 @@ export function assertSingleCycle(pairs: readonly AssignmentPair[]): void {
   }
 }
 
-export function normalizeName(value: string): string {
-  return value.normalize("NFKC").trim().replace(/\s+/gu, " ");
-}
-
-export function nameKey(value: string): string {
-  return normalizeName(value).toLowerCase();
-}
-
 export function normalizeWord(value: string): string {
   return value.trim();
-}
-
-export function normalizeCode(value: string): string {
-  return value.replace(/\s+/gu, "").toUpperCase();
-}
-
-export function generateRoomCode(randomInt: RandomInt): string {
-  let code = "";
-  for (let i = 0; i < ROOM_CODE_LENGTH; i += 1) {
-    const index = randomInt(ROOM_CODE_ALPHABET.length);
-    if (!Number.isInteger(index) || index < 0 || index >= ROOM_CODE_ALPHABET.length) {
-      throw new Error("RNG_OUT_OF_RANGE");
-    }
-    code += ROOM_CODE_ALPHABET[index];
-  }
-  return code;
 }
 
 export function getPublicPhase(status: GameStatus, phase: WordChainPhase | null): PublicPhase {
