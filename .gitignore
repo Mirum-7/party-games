@@ -21,5 +21,8 @@ src/generated/
 playwright-report/
 test-results/
 
+# Subagent-driven development scratch
+.superpowers/
+
 # OS / editor
 .DS_Store

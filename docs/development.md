@@ -36,6 +36,8 @@ src/
 | `DATABASE_URL` | Да | Строка подключения PostgreSQL |
 | `SESSION_PASSWORD` | Да | Секрет `iron-session`, не менее 32 символов |
 | `APP_ORIGIN` | Да | Доверенный origin для проверки mutation |
+| `TEST_DATABASE_URL` | Для integration-тестов | Одноразовая локальная БД, имя оканчивается на `_test` |
+| `E2E_DATABASE_URL` | Для E2E-тестов | Одноразовая локальная БД, имя оканчивается на `_e2e` |
 | `NODE_ENV` | Управляется запуском | Режим production/development |
 
 Локальный `APP_ORIGIN`: `http://localhost:3000`. Секреты не получают префикс `NEXT_PUBLIC_` и не коммитятся. В репозиторий добавляется только `.env.example` с безопасными fictitious-значениями.
@@ -90,6 +92,10 @@ bun run start
 - Изменения схемы поставляются миграцией и проверкой на чистой БД.
 
 ## 5. Тестовая стратегия
+
+Unit- и integration-тесты располагаются в `*.test.ts` и запускаются `bun test`. Playwright E2E располагается в `src/test/e2e/*.e2e.ts` и запускается только через `bun run test:e2e`; суффикс `*.e2e.ts` не даёт Bun test загрузить Playwright-файлы.
+
+Integration- и E2E-тесты выполняются только против локальных одноразовых БД: хост `127.0.0.1` или `localhost`, имя БД оканчивается на `_test` (integration, `TEST_DATABASE_URL`) или `_e2e` (E2E, `E2E_DATABASE_URL`). Подключение тестов к development/production БД запрещено; `assertDisposableDatabaseUrl()` обрывает запуск с ошибкой `TEST_DATABASE_UNSAFE` при нарушении.
 
 ### Unit
 
