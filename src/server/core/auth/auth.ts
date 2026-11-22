@@ -1,3 +1,5 @@
+import "server-only";
+
 import type { Game, Player, PrismaClient } from "@/generated/prisma/client";
 
 import { ApiError } from "@/server/http/errors";
