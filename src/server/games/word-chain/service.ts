@@ -1,14 +1,30 @@
 import "server-only";
 
+import type { GameResult } from "@/generated/prisma/client";
 import { runGameCommand, requireHost, requireLobby, requireMember } from "@/server/core/games/command";
 import type { CommandResult } from "@/server/core/games/command";
 import { cryptoRandomInt, isValidRoomCode, normalizeRoomCode } from "@/server/core/games/code";
 import type { GameDefinition } from "@/server/core/games/types";
 import { GameCommandError, invalidInput } from "@/server/core/games/errors";
+import {
+  countPlacedResults,
+  findPlayerResult,
+  findResultPlayerIds,
+  recordMissingZeroResults,
+  recordPlacedResult,
+} from "@/server/core/results/service";
 import type { GameRealtime } from "@/server/core/realtime/types";
 
 import { submitWordSchema } from "./schemas";
-import { assertSingleCycle, buildCycle, MAX_PLAYERS, MIN_PLAYERS, normalizeWord } from "./rules";
+import {
+  assertSingleCycle,
+  buildCycle,
+  compareResults,
+  MAX_PLAYERS,
+  MIN_PLAYERS,
+  normalizeWord,
+  scoreForPlace,
+} from "./rules";
 import { isValidWord, MAX_WORD_LENGTH } from "./validation";
 import type { WordChainPhase } from "./types";
 
@@ -201,6 +217,199 @@ export async function cancelWordChain(input: {
         data: { phase: null, playingStartedAt: null },
       });
       return { changed: true, value: { cancelled: true } };
+    },
+  });
+}
+
+export type GuessedWordChain = {
+  place: number;
+  score: number;
+  finishedAt: Date;
+  durationMs: number;
+  finished: boolean;
+};
+
+export type FinalStandingItem = {
+  playerId: string;
+  name: string;
+  place: number | null;
+  score: number;
+  durationMs: number | null;
+};
+
+export type FinishedWordChain = {
+  finishedAt: Date;
+  results: FinalStandingItem[];
+};
+
+// SQL CHECK гарантирует: finishedAt задан ровно тогда, когда задано место.
+function requireResultFinishedAt(result: GameResult): Date {
+  if (result.finishedAt === null) {
+    throw new Error("INVARIANT: placed result without finishedAt");
+  }
+  return result.finishedAt;
+}
+
+// Результат с местом возможен только после перехода в PLAYING, поэтому
+// durationMs всегда вычисляется от playingStartedAt.
+function requirePlayingStartedAt(wordChain: { playingStartedAt: Date | null }): Date {
+  if (wordChain.playingStartedAt === null) {
+    throw new Error("INVARIANT: guessing result requires playingStartedAt");
+  }
+  return wordChain.playingStartedAt;
+}
+
+// Угадывание: первое принятое событие фиксирует место, очки и серверное
+// время навсегда. Повтор того же участника возвращает успех без изменений
+// до проверки фазы, в том числе после автоматического FINISHED. Новый
+// результат создаётся только в PLAYING; последнее место завершает игру в
+// том же commit. Одновременные угадывания сериализуются блокировкой Game,
+// поэтому места последовательны и уникальны в порядке принятия транзакций.
+export async function markGuessed(input: {
+  code: string;
+  playerId: string;
+  realtime: GameRealtime;
+  now?: () => Date;
+}): Promise<CommandResult<GuessedWordChain>> {
+  const code = normalizeCodeOrThrow(input.code);
+  const now = input.now ?? (() => new Date());
+
+  return runGameCommand<GuessedWordChain>({
+    code,
+    realtime: input.realtime,
+    action: "guessed",
+    command: async (tx, game) => {
+      await requireMember(tx, game.id, input.playerId);
+
+      const existing = await findPlayerResult(tx, game.id, input.playerId);
+      const wordChain = await tx.wordChainGame.findUniqueOrThrow({ where: { gameId: game.id } });
+      if (existing && existing.place !== null) {
+        const finishedAt = requireResultFinishedAt(existing);
+        const playingStartedAt = requirePlayingStartedAt(wordChain);
+        return {
+          changed: false,
+          value: {
+            place: existing.place,
+            score: existing.score,
+            finishedAt,
+            durationMs: finishedAt.getTime() - playingStartedAt.getTime(),
+            finished: game.status === "FINISHED",
+          },
+        };
+      }
+
+      if (game.status !== "ACTIVE" || wordChain.phase !== "PLAYING") {
+        throw new GameCommandError("INVALID_GAME_STATE", 409, INVALID_PHASE_MESSAGE);
+      }
+
+      const playerCount = await tx.player.count({ where: { gameId: game.id } });
+      const place = (await countPlacedResults(tx, game.id)) + 1;
+      const score = scoreForPlace(playerCount, place);
+      const finishedAt = now();
+      await recordPlacedResult(tx, {
+        gameId: game.id,
+        playerId: input.playerId,
+        place,
+        score,
+        finishedAt,
+      });
+
+      let finished = false;
+      if (place === playerCount) {
+        await tx.game.update({
+          where: { id: game.id },
+          data: { status: "FINISHED", finishedAt },
+        });
+        finished = true;
+      }
+
+      const playingStartedAt = requirePlayingStartedAt(wordChain);
+      return {
+        changed: true,
+        value: {
+          place,
+          score,
+          finishedAt,
+          durationMs: finishedAt.getTime() - playingStartedAt.getTime(),
+          finished,
+        },
+      };
+    },
+  });
+}
+
+// Досрочное завершение админом в PLAYING: существующие результаты
+// сохраняются без изменений, остальным создаются записи null/0/null, игра
+// переходит в FINISHED одним commit. Итоговая таблица сортируется
+// правилами WORD_CHAIN: сначала места по возрастанию, затем не угадавшие
+// по (normalizedName, id).
+export async function finishWordChain(input: {
+  code: string;
+  playerId: string;
+  realtime: GameRealtime;
+  now?: () => Date;
+}): Promise<CommandResult<FinishedWordChain>> {
+  const code = normalizeCodeOrThrow(input.code);
+  const now = input.now ?? (() => new Date());
+
+  return runGameCommand<FinishedWordChain>({
+    code,
+    realtime: input.realtime,
+    action: "finish",
+    command: async (tx, game) => {
+      await requireMember(tx, game.id, input.playerId);
+      requireHost(game, input.playerId);
+      const wordChain = await tx.wordChainGame.findUniqueOrThrow({ where: { gameId: game.id } });
+      if (game.status !== "ACTIVE" || wordChain.phase !== "PLAYING") {
+        throw new GameCommandError("INVALID_GAME_STATE", 409, INVALID_PHASE_MESSAGE);
+      }
+
+      const finishedAt = now();
+      const players = await tx.player.findMany({
+        where: { gameId: game.id },
+        orderBy: [{ joinedAt: "asc" }, { id: "asc" }],
+        select: { id: true, name: true, normalizedName: true },
+      });
+      const resultPlayerIds = await findResultPlayerIds(tx, game.id);
+      const withResult = new Set(resultPlayerIds);
+      const missingPlayerIds = players.filter((player) => !withResult.has(player.id)).map((p) => p.id);
+      await recordMissingZeroResults(tx, game.id, missingPlayerIds);
+
+      await tx.game.update({
+        where: { id: game.id },
+        data: { status: "FINISHED", finishedAt },
+      });
+
+      const playingStartedAt = requirePlayingStartedAt(wordChain);
+      const results = await tx.gameResult.findMany({ where: { gameId: game.id } });
+      const resultByPlayer = new Map(results.map((result) => [result.playerId, result]));
+      const standings: FinalStandingItem[] = players
+        .map((player) => ({ player, result: resultByPlayer.get(player.id) }))
+        .sort((a, b) =>
+          compareResults(
+            {
+              place: a.result?.place ?? null,
+              normalizedName: a.player.normalizedName,
+              playerId: a.player.id,
+            },
+            {
+              place: b.result?.place ?? null,
+              normalizedName: b.player.normalizedName,
+              playerId: b.player.id,
+            },
+          ),
+        )
+        .map(({ player, result }) => ({
+          playerId: player.id,
+          name: player.name,
+          place: result?.place ?? null,
+          score: result?.score ?? 0,
+          durationMs: result?.finishedAt
+            ? result.finishedAt.getTime() - playingStartedAt.getTime()
+            : null,
+        }));
+
+      return { changed: true, value: { finishedAt, results: standings } };
     },
   });
 }
