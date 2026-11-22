@@ -64,7 +64,9 @@ function projectAssigningWords(input: WordChainProjectionInput): WordChainProjec
     results: null,
     capabilities: {
       ...NO_GAME_CAPABILITIES,
-      canSubmitWord: ownAssignment !== null && ownAssignment.word === null,
+      // Редактирование сохранённого слова разрешено до перехода в PLAYING:
+      // право есть, пока существует собственное назначение.
+      canSubmitWord: ownAssignment !== null,
     },
   };
 }

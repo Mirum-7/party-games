@@ -256,10 +256,37 @@ describe("ASSIGNING_WORDS", () => {
         setup: { target: playerRef(targetOf(viewerId)), targetHidden: false, word: SECRETS[viewerId] },
         hints: null,
         results: null,
-        capabilities: capabilities({}),
+        capabilities: capabilities({ canSubmitWord: true }),
       });
       expectGameCapabilitiesKeys(projection.capabilities);
     }
+  });
+
+  test("регрессия: сохранённое слово можно редактировать до PLAYING — canSubmitWord остаётся true", () => {
+    for (const hideTargetNames of [false, true]) {
+      for (const viewerId of PLAYER_IDS) {
+        const projection = projectFor(viewerId, {
+          status: "ACTIVE",
+          phase: "ASSIGNING_WORDS",
+          hideTargetNames,
+          words: SECRETS,
+        });
+        expect(projection.setup?.word).toBe(SECRETS[viewerId]);
+        expect(projection.capabilities).toEqual(capabilities({ canSubmitWord: true }));
+      }
+    }
+  });
+
+  test("canSubmitWord=false, только если собственного назначения нет", () => {
+    const input = buildInput({ status: "ACTIVE", phase: "ASSIGNING_WORDS", words: SECRETS });
+    const withoutOwn = input.assignments.filter((assignment) => assignment.authorPlayerId !== "pl-masha");
+    const projection = projectWordChain({
+      ...input,
+      assignments: withoutOwn,
+      viewer: playerById(input.players, "pl-masha"),
+    });
+    expect(projection.setup?.word).toBeNull();
+    expect(projection.capabilities).toEqual(capabilities({}));
   });
 
   test("пока своё слово не введено: setup.word=null, canSubmitWord=true, секретов нет в JSON", () => {
@@ -452,6 +479,13 @@ describe("FINISHED", () => {
     expect(() => projectWordChain({ ...input, wordChain, viewer: playerById(input.players, "pl-masha") })).toThrow(
       "INVALID_GAME_STATE",
     );
+  });
+
+  test("FINISHED с занявшим место без finishedAt бросает INVALID_GAME_STATE", () => {
+    const results = [makeResult("pl-petya", 1, 4, null)];
+    expect(() =>
+      projectFor("pl-masha", { status: "FINISHED", phase: "PLAYING", words: SECRETS, results }),
+    ).toThrow("INVALID_GAME_STATE");
   });
 });
 
