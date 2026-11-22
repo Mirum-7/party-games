@@ -381,7 +381,7 @@ describe("getGameState: ASSIGNING_WORDS без скрытия адресата",
         },
         hints: null,
         results: null,
-        capabilities: capabilities({ canSubmitWord: true }),
+        capabilities: capabilities({ canSubmitWord: true, canCancel: key === room.hostKey }),
       });
 
       const serialized = JSON.stringify(state);
@@ -438,7 +438,7 @@ describe("getGameState: ASSIGNING_WORDS со скрытием адресата",
       });
       expect(state.hints).toBeNull();
       expect(state.results).toBeNull();
-      expect(state.capabilities).toEqual(capabilities({ canSubmitWord: true }));
+      expect(state.capabilities).toEqual(capabilities({ canSubmitWord: true, canCancel: key === room.hostKey }));
 
       const targetKey = cycle.targetOfAuthor[key];
       const setupSerialized = JSON.stringify(state.setup);
@@ -455,6 +455,46 @@ describe("getGameState: ASSIGNING_WORDS со скрытием адресата",
       expectSecretsPresent(serialized, allowed);
       expectSecretsAbsent(serialized, ALL_SECRETS.filter((secret) => !allowed.includes(secret)));
     }
+  });
+});
+
+describe("getGameState: canCancel по фазам", () => {
+  test("в ASSIGNING_WORDS canCancel=true только у хоста; в остальных фазах у хоста false", async () => {
+    const room = await createRoom({ ready: VIEWER_ORDER });
+
+    // LOBBY: отмены нет.
+    const lobby = await getGameState(room.code, room.playerIds.masha);
+    expect(lobby.capabilities.canCancel).toBe(false);
+
+    await startAssigning(room);
+
+    // ASSIGNING_WORDS: команду cancelWordChain может вызвать только админ.
+    for (const key of VIEWER_ORDER) {
+      const state = await getGameState(room.code, room.playerIds[key]);
+      expect(state.capabilities.canCancel).toBe(key === room.hostKey);
+    }
+
+    await submitWords(room, VIEWER_ORDER);
+    const playing = await getGameState(room.code, room.playerIds.masha);
+    expect(playing.capabilities.canCancel).toBe(false);
+
+    // FINISHED: команда отмены недопустима, capability выключен.
+    const wordChain = await prisma.wordChainGame.findUniqueOrThrow({ where: { gameId: room.gameId } });
+    await prisma.gameResult.create({
+      data: {
+        gameId: room.gameId,
+        playerId: room.playerIds.petya,
+        place: 1,
+        score: 4,
+        finishedAt: new Date(wordChain.playingStartedAt!.getTime() + 90_000),
+      },
+    });
+    await prisma.game.update({
+      where: { id: room.gameId },
+      data: { status: "FINISHED", finishedAt: new Date() },
+    });
+    const finished = await getGameState(room.code, room.playerIds.masha);
+    expect(finished.capabilities.canCancel).toBe(false);
   });
 });
 

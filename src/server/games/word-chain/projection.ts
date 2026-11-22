@@ -52,7 +52,7 @@ export function projectWordChain(input: WordChainProjectionInput): WordChainProj
 }
 
 function projectAssigningWords(input: WordChainProjectionInput): WordChainProjection {
-  const { wordChain, players, viewer, assignments } = input;
+  const { game, wordChain, players, viewer, assignments } = input;
   const ownAssignment = assignments.find((assignment) => assignment.authorPlayerId === viewer.id) ?? null;
   const hideTarget = wordChain.hideTargetNamesDuringSetup;
   const setup: SetupState = {
@@ -69,6 +69,9 @@ function projectAssigningWords(input: WordChainProjectionInput): WordChainProjec
       // Редактирование сохранённого слова разрешено до перехода в PLAYING:
       // право есть, пока существует собственное назначение.
       canSubmitWord: ownAssignment !== null,
+      // Отмену ввода слов (cancelWordChain) разрешает только админ; сервер
+      // повторяет проверку в команде.
+      canCancel: game.hostPlayerId === viewer.id,
     },
   };
 }

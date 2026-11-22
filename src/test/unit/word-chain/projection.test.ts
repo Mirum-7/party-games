@@ -256,7 +256,7 @@ describe("ASSIGNING_WORDS", () => {
         setup: { target: playerRef(targetOf(viewerId)), targetHidden: false, word: SECRETS[viewerId] },
         hints: null,
         results: null,
-        capabilities: capabilities({ canSubmitWord: true }),
+        capabilities: capabilities({ canSubmitWord: true, canCancel: viewerId === HOST_ID }),
       });
       expectGameCapabilitiesKeys(projection.capabilities);
     }
@@ -272,12 +272,14 @@ describe("ASSIGNING_WORDS", () => {
           words: SECRETS,
         });
         expect(projection.setup?.word).toBe(SECRETS[viewerId]);
-        expect(projection.capabilities).toEqual(capabilities({ canSubmitWord: true }));
+        expect(projection.capabilities).toEqual(
+          capabilities({ canSubmitWord: true, canCancel: viewerId === HOST_ID }),
+        );
       }
     }
   });
 
-  test("canSubmitWord=false, только если собственного назначения нет", () => {
+  test("canSubmitWord=false, только если собственного назначения нет; canCancel остаётся правом админа", () => {
     const input = buildInput({ status: "ACTIVE", phase: "ASSIGNING_WORDS", words: SECRETS });
     const withoutOwn = input.assignments.filter((assignment) => assignment.authorPlayerId !== "pl-masha");
     const projection = projectWordChain({
@@ -286,7 +288,7 @@ describe("ASSIGNING_WORDS", () => {
       viewer: playerById(input.players, "pl-masha"),
     });
     expect(projection.setup?.word).toBeNull();
-    expect(projection.capabilities).toEqual(capabilities({}));
+    expect(projection.capabilities).toEqual(capabilities({ canCancel: true }));
   });
 
   test("пока своё слово не введено: setup.word=null, canSubmitWord=true, секретов нет в JSON", () => {
@@ -304,7 +306,9 @@ describe("ASSIGNING_WORDS", () => {
         });
         expect(projection.hints).toBeNull();
         expect(projection.results).toBeNull();
-        expect(projection.capabilities).toEqual(capabilities({ canSubmitWord: true }));
+        expect(projection.capabilities).toEqual(
+          capabilities({ canSubmitWord: true, canCancel: viewerId === HOST_ID }),
+        );
         expectSecretsAbsent(JSON.stringify(projection), ALL_SECRETS);
       }
     }
