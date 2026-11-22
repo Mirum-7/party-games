@@ -244,3 +244,45 @@ export async function leaveGame(code: string, options: ApiClientOptions = {}): P
   });
   await ensureOk(response);
 }
+
+// Зеркало серверного normalizeRoomCode: клиент не может импортировать
+// серверный модуль (node:crypto), семантика совпадает с src/server/core/games/code.ts.
+function normalizeCodeForRequest(value: string): string {
+  return value.replace(/\s+/gu, "").toUpperCase();
+}
+
+// POST /games → 201 + state; возвращает код новой комнаты. gameType явно
+// фиксируется на единственный поддерживаемый тип.
+export async function createGame(
+  name: string,
+  options: ApiClientOptions = {},
+): Promise<string> {
+  const fetcher = options.fetcher ?? ((input, init) => fetch(input, init));
+  const headers = new Headers({ "Content-Type": "application/json" });
+  const response = await performFetch(fetcher, "/api/v1/games", {
+    ...baseInit("POST", options),
+    headers,
+    body: JSON.stringify({ name, gameType: "WORD_CHAIN" }),
+  });
+  await ensureOk(response);
+  const state = await parseGameState(response);
+  return state.game.code;
+}
+
+// POST /games/{code}/join → 200 + state. Код нормализуется до запроса,
+// имя передаётся без изменений.
+export async function joinGame(
+  code: string,
+  name: string,
+  options: ApiClientOptions = {},
+): Promise<void> {
+  const fetcher = options.fetcher ?? ((input, init) => fetch(input, init));
+  const headers = new Headers({ "Content-Type": "application/json" });
+  const response = await performFetch(fetcher, gameUrl(normalizeCodeForRequest(code), "/join"), {
+    ...baseInit("POST", options),
+    headers,
+    body: JSON.stringify({ name }),
+  });
+  await ensureOk(response);
+  await parseGameState(response);
+}
