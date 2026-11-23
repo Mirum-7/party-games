@@ -109,8 +109,13 @@ test("перезагрузка в LOBBY и ASSIGNING_WORDS: фаза, ревиз
     await expect(page.getByText("Участники (1/12)")).toBeVisible();
     await expect(page.getByText("Хост")).toBeVisible();
     // Админ в лобби: настройки доступны; старт недоступен без 3 участников.
+    // Кнопка и причина недоступности видны, но кнопка отключена
+    // (одобренное disabled-start+aria поведение из acceptance-ветки).
     await expect(page.locator("#hide-targets-switch")).toBeVisible();
-    await expect(page.getByRole("button", { name: "Начать игру" })).toHaveCount(0);
+    const startButton = page.getByRole("button", { name: "Начать игру" });
+    await expect(startButton).toBeVisible();
+    await expect(startButton).toBeDisabled();
+    await expect(page.locator("#start-block-reason")).toBeVisible();
 
     const lobbyState = await fetchStateInPage(page, code);
     expect(lobbyState.game.phase).toBe("LOBBY");
