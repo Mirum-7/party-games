@@ -21,27 +21,52 @@ export const RATE_LIMIT_RULES: RateLimitRules = {
 
 type WindowEntry = {
   startedAt: number;
+  expiresAt: number;
   count: number;
 };
 
 export class RateLimiter {
   private readonly rules: RateLimitRules;
   private readonly windows = new Map<string, WindowEntry>();
+  private readonly sweepIntervalMs: number;
+  private nextSweepAt: number;
 
   constructor(rules: Partial<RateLimitRules> = {}, now: Clock = () => Date.now()) {
     this.rules = { ...RATE_LIMIT_RULES, ...rules };
     this.now = now;
+    this.sweepIntervalMs = Math.min(...Object.values(this.rules).map((rule) => rule.windowMs));
+    this.nextSweepAt = 0;
   }
 
   private readonly now: Clock;
 
+  // Процесс живёт долго, а ключи (route, IP) создавались бы бесконечно.
+  // Поэтому раз в sweepIntervalMs выметаются окна с истекшим сроком; интервал
+  // равен минимальному окну правил, так ни одно живое окно не теряет счётчик.
+  private sweepExpired(nowMs: number): void {
+    for (const [key, entry] of this.windows) {
+      if (entry.expiresAt <= nowMs) {
+        this.windows.delete(key);
+      }
+    }
+    this.nextSweepAt = nowMs + this.sweepIntervalMs;
+  }
+
   check(category: RateLimitCategory, route: string, ip: string): void {
+    const nowMs = this.now();
+    if (nowMs >= this.nextSweepAt) {
+      this.sweepExpired(nowMs);
+    }
     const rule = this.rules[category];
-    const windowStart = Math.floor(this.now() / rule.windowMs) * rule.windowMs;
+    const windowStart = Math.floor(nowMs / rule.windowMs) * rule.windowMs;
     const key = `${category}:${route}:${ip}`;
     const current = this.windows.get(key);
     if (current === undefined || current.startedAt !== windowStart) {
-      this.windows.set(key, { startedAt: windowStart, count: 1 });
+      this.windows.set(key, {
+        startedAt: windowStart,
+        expiresAt: windowStart + rule.windowMs,
+        count: 1,
+      });
       return;
     }
     current.count += 1;
@@ -52,6 +77,7 @@ export class RateLimiter {
 
   reset(): void {
     this.windows.clear();
+    this.nextSweepAt = 0;
   }
 }
 
