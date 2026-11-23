@@ -100,6 +100,37 @@ test("лобби: вход по коду, синхронизация готов�
   }
 });
 
+test("лобби: отказ доступа к буферу обмена показывает ошибку без исключения", async ({
+  browser,
+}) => {
+  const consoleErrors: string[] = [];
+  const context = await browser.newContext();
+  await context.addInitScript(() => {
+    Object.defineProperty(navigator, "share", { configurable: true, value: undefined });
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: {
+        writeText: () => Promise.reject(new DOMException("Доступ запрещён", "NotAllowedError")),
+      },
+    });
+  });
+  const page = await context.newPage();
+  watchConsole(page, consoleErrors);
+
+  try {
+    await createGameViaUi(page, "Маша");
+    await page.getByRole("button", { name: "Скопировать приглашение" }).click();
+
+    await expect(
+      page.getByRole("alert").filter({ hasText: "Не удалось скопировать приглашение" }),
+    ).toBeVisible();
+    await expect(page.getByRole("button", { name: "Скопировать приглашение" })).toBeVisible();
+    expect(consoleErrors).toEqual([]);
+  } finally {
+    await context.close();
+  }
+});
+
 test("комната: форма входа без членства, 404 для неизвестного кода, ошибка занятого имени", async ({
   browser,
 }) => {

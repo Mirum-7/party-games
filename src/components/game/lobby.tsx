@@ -52,8 +52,10 @@ function inviteText(code: string): string {
 
 function InviteShareButton({ code }: { code: string }) {
   const [copied, setCopied] = React.useState(false);
+  const [copyFailed, setCopyFailed] = React.useState(false);
 
   async function handleShare() {
+    setCopyFailed(false);
     const text = inviteText(code);
     if (typeof navigator !== "undefined" && typeof navigator.share === "function") {
       try {
@@ -63,14 +65,26 @@ function InviteShareButton({ code }: { code: string }) {
         // Пользователь закрыл шеринг или он недоступен — fallback на буфер.
       }
     }
-    await navigator.clipboard.writeText(text);
-    setCopied(true);
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+    } catch {
+      setCopied(false);
+      setCopyFailed(true);
+    }
   }
 
   return (
-    <Button type="button" variant="secondary" onClick={handleShare} className="min-h-11 w-full">
-      {copied ? "Скопировано" : "Скопировать приглашение"}
-    </Button>
+    <>
+      <Button type="button" variant="secondary" onClick={handleShare} className="min-h-11 w-full">
+        {copied ? "Скопировано" : "Скопировать приглашение"}
+      </Button>
+      {copyFailed ? (
+        <p role="alert" className="text-sm text-destructive">
+          Не удалось скопировать приглашение. Скопируйте текст вручную.
+        </p>
+      ) : null}
+    </>
   );
 }
 
