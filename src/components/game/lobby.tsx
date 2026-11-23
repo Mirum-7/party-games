@@ -130,6 +130,10 @@ export function Lobby({
   const viewerPlayer = players.find((player) => player.id === viewer.playerId) ?? null;
   const startBlockReason = getStartBlockReason(players);
   const canStart = capabilities.canStart && startBlockReason === null;
+  // Кнопку запуска и причину недоступности видит админ в лобби: даже когда
+  // старт невозможен, причина обязана быть видимой. Сервер повторяет все
+  // проверки при POST /start, показ контрола ничего не разрешает.
+  const showStartControls = capabilities.canStart || capabilities.canEditSettings;
 
   return (
     <div className="mx-auto flex w-full max-w-md flex-col gap-4">
@@ -206,18 +210,21 @@ export function Lobby({
 
       <Separator />
 
-      {capabilities.canStart ? (
+      {showStartControls ? (
         <div className="flex flex-col gap-2">
           <Button
             type="button"
             disabled={mutationPending || !canStart}
+            aria-describedby={startBlockReason !== null ? "start-block-reason" : undefined}
             onClick={() => void onStart()}
             className="min-h-11 w-full"
           >
             Начать игру
           </Button>
-          {startBlockReason ? (
-            <p className="text-sm text-muted-foreground">{startBlockReason}</p>
+          {startBlockReason !== null ? (
+            <p id="start-block-reason" className="text-sm text-muted-foreground">
+              {startBlockReason}
+            </p>
           ) : null}
         </div>
       ) : null}
