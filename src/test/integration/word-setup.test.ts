@@ -193,6 +193,35 @@ describe("startWordChain", () => {
     expect(await loadAssignments(room.gameId)).toHaveLength(0);
   });
 
+  test("прямой запуск с 13 участниками — GAME_FULL (guard MAX_PLAYERS в обход лимита входа)", async () => {
+    // Сервис входа капает комнату на 12, поэтому 13-й участник создаётся
+    // напрямую в БД: guard в startWordChain обязан сработать независимо.
+    const created = await createGame({ definition, name: "Маша" });
+    for (let i = 2; i <= 13; i += 1) {
+      await prisma.player.create({
+        data: { gameId: created.gameId, name: `Игрок${i}`, normalizedName: `игрок${i}` },
+      });
+    }
+    await prisma.player.updateMany({ where: { gameId: created.gameId }, data: { isReady: true } });
+
+    await expectGameError(
+      Promise.resolve(
+        startWordChain({
+          code: created.code,
+          playerId: created.playerId,
+          realtime: createSpyRealtime().realtime,
+        }),
+      ),
+      "GAME_FULL",
+      409,
+    );
+
+    const game = await loadGame(created.gameId);
+    expect(game.status).toBe("LOBBY");
+    expect(game.revision).toBe(0);
+    expect(await loadAssignments(created.gameId)).toHaveLength(0);
+  });
+
   test("запуск с двумя участниками — NOT_ENOUGH_PLAYERS", async () => {
     const created = await createGame({ definition, name: "Маша" });
     await joinGame({
@@ -436,6 +465,36 @@ describe("submitWord", () => {
     const game = await loadGame(room.gameId);
     expect(game.revision).toBe(room.baseRevision + 2);
     expect(game.wordChain?.phase).toBe("ASSIGNING_WORDS");
+    expect(published).toEqual([{ gameId: room.gameId, revision: room.baseRevision + 2 }]);
+  });
+
+  test("два одновременных одинаковых слова одного автора: один commit, второй — no-op без ревизии", async () => {
+    const room = await createReadyRoom(["Маша", "Петя", "Ваня"]);
+    await startWordChain({
+      code: room.code,
+      playerId: room.hostId,
+      realtime: createSpyRealtime().realtime,
+    });
+    const { realtime, published } = createSpyRealtime();
+
+    // Блокировка Game сериализует команды: первый commit пишет слово, второй
+    // видит совпадение нормализованного значения и не трогает ревизию.
+    const [first, second] = await Promise.all([
+      submitWord({ code: room.code, playerId: room.playerIds[0]!, word: "самолёт", realtime }),
+      submitWord({ code: room.code, playerId: room.playerIds[0]!, word: "  самолёт  ", realtime }),
+    ]);
+
+    expect([first.changed, second.changed].sort()).toEqual([false, true]);
+    expect(first.revision).toBe(room.baseRevision + 2);
+    expect(second.revision).toBe(room.baseRevision + 2);
+
+    const game = await loadGame(room.gameId);
+    expect(game.revision).toBe(room.baseRevision + 2);
+    expect(game.wordChain?.phase).toBe("ASSIGNING_WORDS");
+    const own = (await loadAssignments(room.gameId)).find(
+      (a) => a.authorPlayerId === room.playerIds[0]!,
+    )!;
+    expect(own.word).toBe("самолёт");
     expect(published).toEqual([{ gameId: room.gameId, revision: room.baseRevision + 2 }]);
   });
 

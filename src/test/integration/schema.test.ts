@@ -21,10 +21,59 @@ afterAll(async () => {
   await prisma.$disconnect();
 });
 
-// PrismaPromise is a thenable, not a native Promise, so bun:test's
-// expect(...).rejects does not adopt it; wrapping keeps the same assertion.
-async function expectConstraintViolation(promise: PromiseLike<unknown>): Promise<void> {
-  await expect(Promise.resolve(promise)).rejects.toThrow();
+// Имена ограничений — часть контракта (docs/data-model.md, раздел про
+// сохранение raw CHECK при будущих migrate dev): тесты фиксируют конкретное
+// имя и SQLSTATE, а не «любую ошибку», чтобы случайное переименование или
+// потеря ограничения ловились сразу.
+const CONSTRAINT_KINDS = {
+  unique: { prismaCode: "P2002", sqlstate: "23505" },
+  check: { prismaCode: "P2039", sqlstate: "23514" },
+  restrict: { prismaCode: "P2003", sqlstate: "23001" },
+  // VARCHAR(80) срабатывает раньше CHECK: тип колонки — первая линия защиты.
+  tooLong: { prismaCode: "P2000", sqlstate: "22001" },
+} as const;
+type ConstraintKind = keyof typeof CONSTRAINT_KINDS;
+
+type PrismaConstraintError = {
+  name?: string;
+  code?: string;
+  meta?: {
+    driverAdapterError?: {
+      cause?: {
+        originalCode?: string;
+        originalMessage?: string;
+        constraint?: { index?: string };
+      };
+    };
+  };
+};
+
+async function expectConstraintViolation(
+  promise: PromiseLike<unknown>,
+  kind: ConstraintKind,
+  constraint: string,
+): Promise<void> {
+  // PrismaPromise is a thenable, not a native Promise, so bun:test's
+  // expect(...).rejects does not adopt it; wrapping keeps the same assertion.
+  const error: unknown = await Promise.resolve(promise).then(
+    () => {
+      throw new Error(`Expected constraint violation "${constraint}", but the promise resolved`);
+    },
+    (cause) => cause,
+  );
+  const expected = CONSTRAINT_KINDS[kind];
+  const prismaError = error as PrismaConstraintError;
+  expect(prismaError.name).toBe("PrismaClientKnownRequestError");
+  expect(prismaError.code).toBe(expected.prismaCode);
+  const cause = prismaError.meta?.driverAdapterError?.cause ?? {};
+  expect(cause.originalCode).toBe(expected.sqlstate);
+  if (kind === "check") {
+    expect(cause.originalMessage).toContain(`violates check constraint "${constraint}"`);
+  } else if (kind === "tooLong") {
+    expect(cause.originalMessage).toContain("character varying(80)");
+  } else {
+    expect(cause.constraint?.index).toBe(constraint);
+  }
 }
 
 function uniqueCode(): string {
@@ -60,13 +109,15 @@ describe("words game database constraints", () => {
     const game = await createGame();
     await expectConstraintViolation(
       prisma.game.create({ data: { code: game.code, type: "WORD_CHAIN", status: "LOBBY" } }),
+      "unique",
+      "games_code_key",
     );
   });
 
   test("rejects duplicate player normalizedName in the same game", async () => {
     const game = await createGame();
     await createPlayer(game.id, "Маша");
-    await expectConstraintViolation(createPlayer(game.id, "МАША"));
+    await expectConstraintViolation(createPlayer(game.id, "МАША"), "unique", "players_gameId_normalizedName_key");
   });
 
   test("rejects duplicate assignment author in the same game", async () => {
@@ -75,7 +126,14 @@ describe("words game database constraints", () => {
     const firstTarget = await createPlayer(game.id, "Петя");
     const secondTarget = await createPlayer(game.id, "Ваня");
     await createAssignment(game.id, author.id, firstTarget.id);
-    await expectConstraintViolation(createAssignment(game.id, author.id, secondTarget.id));
+    // Глобальный @unique по authorPlayerId создан раньше составного
+    // (gameId, authorPlayerId) и Postgres стабильно отчитывается о нём;
+    // оба ограничения из миграции при этом сохраняются.
+    await expectConstraintViolation(
+      createAssignment(game.id, author.id, secondTarget.id),
+      "unique",
+      "word_assignments_authorPlayerId_key",
+    );
   });
 
   test("rejects duplicate assignment target in the same game", async () => {
@@ -84,7 +142,11 @@ describe("words game database constraints", () => {
     const secondAuthor = await createPlayer(game.id, "Петя");
     const target = await createPlayer(game.id, "Ваня");
     await createAssignment(game.id, firstAuthor.id, target.id);
-    await expectConstraintViolation(createAssignment(game.id, secondAuthor.id, target.id));
+    await expectConstraintViolation(
+      createAssignment(game.id, secondAuthor.id, target.id),
+      "unique",
+      "word_assignments_targetPlayerId_key",
+    );
   });
 
   test("rejects self-assignment", async () => {
@@ -94,6 +156,8 @@ describe("words game database constraints", () => {
       prisma.wordAssignment.create({
         data: { gameId: game.id, authorPlayerId: player.id, targetPlayerId: player.id },
       }),
+      "check",
+      "word_assignments_no_self_target",
     );
   });
 
@@ -108,6 +172,8 @@ describe("words game database constraints", () => {
       prisma.gameResult.create({
         data: { gameId: game.id, playerId: second.id, place: 1, score: 2, finishedAt: new Date() },
       }),
+      "unique",
+      "game_results_gameId_place_key",
     );
   });
 
@@ -128,6 +194,8 @@ describe("words game database constraints", () => {
       prisma.gameResult.create({
         data: { gameId: game.id, playerId: player.id, place: 0, score: 1, finishedAt: new Date() },
       }),
+      "check",
+      "game_results_place_positive",
     );
   });
 
@@ -138,6 +206,8 @@ describe("words game database constraints", () => {
       prisma.gameResult.create({
         data: { gameId: game.id, playerId: player.id, place: 1, score: 1 },
       }),
+      "check",
+      "game_results_place_time_pair",
     );
   });
 
@@ -148,6 +218,8 @@ describe("words game database constraints", () => {
       prisma.gameResult.create({
         data: { gameId: game.id, playerId: player.id, score: 0, finishedAt: new Date() },
       }),
+      "check",
+      "game_results_place_time_pair",
     );
   });
 
@@ -158,6 +230,8 @@ describe("words game database constraints", () => {
       prisma.gameResult.create({
         data: { gameId: game.id, playerId: player.id, place: 1, score: 0, finishedAt: new Date() },
       }),
+      "check",
+      "game_results_score_place_pair",
     );
   });
 
@@ -168,6 +242,8 @@ describe("words game database constraints", () => {
       prisma.gameResult.create({
         data: { gameId: game.id, playerId: player.id, score: 1 },
       }),
+      "check",
+      "game_results_score_place_pair",
     );
   });
 
@@ -179,6 +255,8 @@ describe("words game database constraints", () => {
       prisma.wordAssignment.create({
         data: { gameId: game.id, authorPlayerId: author.id, targetPlayerId: target.id, word: "слово" },
       }),
+      "check",
+      "word_assignments_word_submission_pair",
     );
   });
 
@@ -195,6 +273,8 @@ describe("words game database constraints", () => {
           submittedAt: new Date(),
         },
       }),
+      "check",
+      "word_assignments_word_submission_pair",
     );
   });
 
@@ -212,6 +292,8 @@ describe("words game database constraints", () => {
           submittedAt: new Date(),
         },
       }),
+      "check",
+      "word_assignments_word_length",
     );
   });
 
@@ -229,6 +311,8 @@ describe("words game database constraints", () => {
           submittedAt: new Date(),
         },
       }),
+      "tooLong",
+      "word_assignments.word",
     );
   });
 
@@ -236,12 +320,35 @@ describe("words game database constraints", () => {
     const game = await createGame();
     const host = await createPlayer(game.id, "Маша");
     await prisma.game.update({ where: { id: game.id }, data: { hostPlayerId: host.id } });
-    await expectConstraintViolation(prisma.player.delete({ where: { id: host.id } }));
+    await expectConstraintViolation(prisma.player.delete({ where: { id: host.id } }), "restrict", "games_hostPlayerId_fkey");
   });
 
   test("rejects a second word chain game row for the same game", async () => {
     const game = await createGame();
     await prisma.wordChainGame.create({ data: { gameId: game.id } });
-    await expectConstraintViolation(prisma.wordChainGame.create({ data: { gameId: game.id } }));
+    await expectConstraintViolation(
+      prisma.wordChainGame.create({ data: { gameId: game.id } }),
+      "unique",
+      "word_chain_games_pkey",
+    );
+  });
+
+  test("deleting a populated room cascades to players, assignments, results and word chain settings", async () => {
+    const game = await createGame();
+    const host = await createPlayer(game.id, "Маша");
+    const guest = await createPlayer(game.id, "Петя");
+    await prisma.game.update({ where: { id: game.id }, data: { hostPlayerId: host.id } });
+    await prisma.wordChainGame.create({ data: { gameId: game.id, phase: "PLAYING" } });
+    await createAssignment(game.id, host.id, guest.id);
+    await prisma.gameResult.create({
+      data: { gameId: game.id, playerId: host.id, place: 1, score: 2, finishedAt: new Date() },
+    });
+
+    await prisma.game.delete({ where: { id: game.id } });
+
+    expect(await prisma.player.count({ where: { gameId: game.id } })).toBe(0);
+    expect(await prisma.wordAssignment.count({ where: { gameId: game.id } })).toBe(0);
+    expect(await prisma.gameResult.count({ where: { gameId: game.id } })).toBe(0);
+    expect(await prisma.wordChainGame.count({ where: { gameId: game.id } })).toBe(0);
   });
 });
