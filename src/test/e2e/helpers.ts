@@ -1,4 +1,4 @@
-import { expect, request, test, type APIRequestContext, type APIResponse } from "@playwright/test";
+import { expect, request, test, type APIRequestContext, type APIResponse, type Browser, type BrowserContext, type BrowserContextOptions } from "@playwright/test";
 import { request as httpsRequest } from "node:https";
 
 import type { GameStateResponse } from "../../shared/contracts/game";
@@ -82,6 +82,26 @@ export function newScenarioContext(ip: string = nextScenarioIp()): Promise<APIRe
     extraHTTPHeaders: { "x-forwarded-for": ip },
     // Только для тестового самоподписанного сертификата TLS-прокси.
     ignoreHTTPSErrors: true,
+  });
+}
+
+// Браузерные контексты не получают IP автоматически: без явного
+// x-forwarded-for все UI-join/create делят fallback-лимит (30/мин на IP), и
+// полный прогон падает лавиной 429. Хелпер назначает каждому браузерному
+// контексту свой IP через nextScenarioIp (диапазоны сценариев и проектов не
+// пересекаются), сохраняя переданные options: extraHTTPHeaders мерджатся,
+// ignoreHTTPSErrors нужен только из-за тестового TLS-прокси.
+export function newBrowserContext(
+  browser: Browser,
+  options: BrowserContextOptions = {},
+): Promise<BrowserContext> {
+  return browser.newContext({
+    ...options,
+    ignoreHTTPSErrors: true,
+    extraHTTPHeaders: {
+      "x-forwarded-for": nextScenarioIp(),
+      ...options.extraHTTPHeaders,
+    },
   });
 }
 

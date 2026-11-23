@@ -10,6 +10,7 @@ import {
   cancelWordChain,
   finishWordChain,
   markGuessed,
+  restartWordChain,
   startWordChain,
   submitWord,
   wordChainGameDefinition,
@@ -21,7 +22,7 @@ const definitions: Record<GameType, GameDefinition> = {
   WORD_CHAIN: wordChainGameDefinition,
 };
 
-export { cancelWordChain, finishWordChain, markGuessed, startWordChain, submitWord };
+export { cancelWordChain, finishWordChain, markGuessed, restartWordChain, startWordChain, submitWord };
 
 export function getGameDefinition(type: GameType): GameDefinition {
   const definition = definitions[type];

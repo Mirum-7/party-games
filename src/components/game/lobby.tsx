@@ -1,25 +1,16 @@
 "use client";
 
 import * as React from "react";
+import { UserMinus } from "lucide-react";
 
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from "@/components/ui/alert-dialog";
+import { ConfirmDialog } from "@/components/game/confirm-dialog";
+import { PlayerRow } from "@/components/game/player-row";
 import { Badge } from "@/components/ui/badge";
-import { Button, buttonVariants } from "@/components/ui/button";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
-import { cn } from "@/lib/utils";
 import type {
   GameStateResponse,
   PlayerSummary,
@@ -50,9 +41,19 @@ function inviteText(code: string): string {
   return `Присоединяйся к игре Words Game! Код комнаты: ${code}`;
 }
 
+// Обратная связь «Код скопирован» самоисчезает через 2–3 с; cleanup таймера
+// в эффекте не даёт setState после размонтирования кнопки.
+export const INVITE_COPIED_RESET_MS = 2000;
+
 function InviteShareButton({ code }: { code: string }) {
   const [copied, setCopied] = React.useState(false);
   const [copyFailed, setCopyFailed] = React.useState(false);
+
+  React.useEffect(() => {
+    if (!copied) return;
+    const timer = setTimeout(() => setCopied(false), INVITE_COPIED_RESET_MS);
+    return () => clearTimeout(timer);
+  }, [copied]);
 
   async function handleShare() {
     setCopyFailed(false);
@@ -77,7 +78,7 @@ function InviteShareButton({ code }: { code: string }) {
   return (
     <>
       <Button type="button" variant="secondary" onClick={handleShare} className="min-h-11 w-full">
-        {copied ? "Скопировано" : "Скопировать приглашение"}
+        {copied ? "Код скопирован" : "Скопировать приглашение"}
       </Button>
       {copyFailed ? (
         <p role="alert" className="text-sm text-destructive">
@@ -85,49 +86,6 @@ function InviteShareButton({ code }: { code: string }) {
         </p>
       ) : null}
     </>
-  );
-}
-
-type ConfirmProps = {
-  title: string;
-  description: string;
-  actionLabel: string;
-  triggerLabel: string;
-  triggerVariant?: "outline" | "ghost";
-  disabled?: boolean;
-  onAction: () => Promise<void>;
-};
-
-function ConfirmDialog({
-  title,
-  description,
-  actionLabel,
-  triggerLabel,
-  triggerVariant = "outline",
-  disabled,
-  onAction,
-}: ConfirmProps) {
-  return (
-    <AlertDialog>
-      <AlertDialogTrigger
-        disabled={disabled}
-        className={cn(buttonVariants({ variant: triggerVariant }), "min-h-11 w-full")}
-      >
-        {triggerLabel}
-      </AlertDialogTrigger>
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle>{title}</AlertDialogTitle>
-          <AlertDialogDescription>{description}</AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel className="min-h-11">Отмена</AlertDialogCancel>
-          <AlertDialogAction onClick={() => void onAction()} className="min-h-11">
-            {actionLabel}
-          </AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
   );
 }
 
@@ -155,13 +113,13 @@ export function Lobby({
         <h1 className="text-xl font-semibold tracking-tight">Лобби</h1>
       </header>
 
-      <Card>
+      <Card className="border-primary/40 bg-primary text-primary-foreground">
         <CardHeader>
           <CardTitle className="text-base">Код комнаты</CardTitle>
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
           <p className="text-center font-mono text-3xl font-bold tracking-[0.3em]">{game.code}</p>
-          <p className="text-sm text-muted-foreground">{inviteText(game.code)}</p>
+          <p className="text-sm text-primary-foreground">{inviteText(game.code)}</p>
           <InviteShareButton code={game.code} />
         </CardContent>
       </Card>
@@ -174,37 +132,64 @@ export function Lobby({
         </CardHeader>
         <CardContent>
           <ol className="flex flex-col">
-            {players.map((player, index) => (
-              <li key={player.id}>
-                {index > 0 ? <Separator /> : null}
-                <div className="flex min-h-11 items-center gap-2 py-1.5">
-                  <span className="min-w-0 flex-1 truncate font-medium">{player.name}</span>
-                  {player.isHost ? <Badge variant="secondary">Хост</Badge> : null}
-                  {player.hasSubmittedWord ? <Badge variant="secondary">Слово загадано</Badge> : null}
-                  {player.hasGuessed ? <Badge variant="secondary">Угадал</Badge> : null}
-                  {player.isReady ? (
-                    <Badge variant="default">Готов</Badge>
-                  ) : (
-                    <Badge variant="outline">Не готов</Badge>
-                  )}
-                </div>
-              </li>
+            {players.map((player) => (
+              <PlayerRow
+                key={player.id}
+                player={player}
+                isViewer={player.id === viewer.playerId}
+                status={
+                  <>
+                    {player.hasSubmittedWord ? <Badge variant="secondary">Слово загадано</Badge> : null}
+                    {player.hasGuessed ? <Badge variant="secondary">Угадал</Badge> : null}
+                    {player.isReady ? (
+                      <Badge variant="success">Готов</Badge>
+                    ) : (
+                      <Badge variant="warning">Пока не готов</Badge>
+                    )}
+                  </>
+                }
+                action={
+                  capabilities.canManagePlayers && player.id !== viewer.playerId ? (
+                    <ConfirmDialog
+                      trigger={
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          className="size-11 shrink-0 text-destructive hover:bg-destructive/10"
+                          aria-label={`Удалить участника «${player.name}»`}
+                          disabled={mutationPending}
+                        >
+                          <UserMinus aria-hidden="true" />
+                        </Button>
+                      }
+                      title={`Удалить участника «${player.name}»?`}
+                      description="Игрок будет исключён из комнаты. Это действие нельзя отменить."
+                      actionLabel="Удалить"
+                      actionVariant="destructive"
+                      onAction={() => onRemove(player.id)}
+                    />
+                  ) : undefined
+                }
+              />
             ))}
           </ol>
         </CardContent>
       </Card>
 
-      <div className="flex items-center justify-between gap-2">
-        <Label htmlFor="ready-switch" className="flex min-h-11 flex-1 items-center">
-          Готовность{viewerPlayer ? `: ${viewerPlayer.name}` : ""}
-        </Label>
-        <Switch
-          id="ready-switch"
-          checked={viewerPlayer?.isReady ?? false}
+      <div className="flex flex-col gap-2">
+        <Button
+          type="button"
+          id="ready-button"
+          variant={viewerPlayer?.isReady ? "success" : "default"}
           disabled={mutationPending || !viewerPlayer}
-          onCheckedChange={(checked) => void onToggleReady(checked)}
-          className="h-7 w-14"
-        />
+          onClick={() => void onToggleReady(!(viewerPlayer?.isReady ?? false))}
+          className="min-h-11 w-full"
+        >
+          {viewerPlayer?.isReady ? "Вы готовы" : "Я готов"}
+        </Button>
+        {viewerPlayer?.isReady && !viewerPlayer.isHost ? (
+          <p className="text-center text-sm text-muted-foreground">Ждём начала игры хостом</p>
+        ) : null}
       </div>
 
       {capabilities.canEditSettings ? (
@@ -243,32 +228,22 @@ export function Lobby({
         </div>
       ) : null}
 
-      <div className="flex flex-col gap-2">
-        {capabilities.canManagePlayers
-          ? players
-              .filter((player) => player.id !== viewer.playerId)
-              .map((player) => (
-                <ConfirmDialog
-                  key={player.id}
-                  triggerLabel={`Удалить ${player.name}`}
-                  title={`Удалить ${player.name}?`}
-                  description="Игрок будет исключён из комнаты. Это действие нельзя отменить."
-                  actionLabel="Удалить"
-                  disabled={mutationPending}
-                  onAction={() => onRemove(player.id)}
-                />
-              ))
-          : null}
-        <ConfirmDialog
-          triggerLabel="Выйти из игры"
-          triggerVariant="ghost"
-          title="Выйти из игры?"
-          description="Вы покинете комнату и вернётесь на главную страницу."
-          actionLabel="Выйти"
-          disabled={mutationPending || !capabilities.canLeave}
-          onAction={onLeave}
-        />
-      </div>
+      <ConfirmDialog
+        trigger={
+          <Button
+            type="button"
+            variant="ghost"
+            className="min-h-11 w-full"
+            disabled={mutationPending || !capabilities.canLeave}
+          >
+            Выйти из игры
+          </Button>
+        }
+        title="Выйти из игры?"
+        description="Вы покинете комнату и вернётесь на главную страницу."
+        actionLabel="Выйти"
+        onAction={onLeave}
+      />
     </div>
   );
 }

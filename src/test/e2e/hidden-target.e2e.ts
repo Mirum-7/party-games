@@ -1,5 +1,6 @@
 import { expect, test, type Browser, type Page } from "@playwright/test";
 
+import { newBrowserContext } from "./helpers";
 import {
   CANARY_WORDS,
   captureViewerSurfaces,
@@ -45,10 +46,10 @@ async function openFourContexts(browser: Browser): Promise<{
   close: () => Promise<void>;
 }> {
   const contexts = [
-    await browser.newContext(),
-    await browser.newContext(),
-    await browser.newContext(),
-    await browser.newContext(),
+    await newBrowserContext(browser),
+    await newBrowserContext(browser),
+    await newBrowserContext(browser),
+    await newBrowserContext(browser),
   ];
   const players: Player[] = [];
   for (let index = 0; index < contexts.length; index += 1) {
@@ -70,11 +71,8 @@ function byName(players: Player[], name: ViewerName): Player {
 
 async function createRoomAndEnableHiddenTargets(masha: Page): Promise<string> {
   await masha.goto("/");
-  const createSection = masha.locator("section", {
-    has: masha.getByRole("heading", { name: "Создать игру" }),
-  });
-  await createSection.getByLabel("Ваше имя").fill("Маша");
-  await createSection.getByRole("button", { name: "Создать игру" }).click();
+  await masha.locator("#player-name").fill("Маша");
+  await masha.getByRole("button", { name: "Создать комнату" }).click();
   await expect(masha.getByRole("heading", { name: "Лобби" })).toBeVisible();
   const code = new URL(masha.url()).pathname.split("/").at(-1) ?? "";
   expect(code).toMatch(/^[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{6}$/u);
@@ -132,11 +130,11 @@ test("скрытие адресатов: нет связки автор→адр
 
     // 2. Все готовы, админ запускает — все в ASSIGNING_WORDS.
     for (const player of players) {
-      await player.page.locator("#ready-switch").click();
+      await player.page.locator("#ready-button").click();
     }
     await masha.page.getByRole("button", { name: "Начать игру" }).click();
     for (const player of players) {
-      await expect(player.page.getByRole("heading", { name: "Введи загаданное слово" })).toBeVisible();
+      await expect(player.page.getByRole("heading", { name: "Введите загаданное слово" })).toBeVisible();
     }
 
     // 3. Каждый автор: структурированный setup скрывает адресата, UI не
@@ -152,7 +150,7 @@ test("скрытие адресатов: нет связки автор→адр
       const page = player.page;
       await expect(page.getByText(HIDDEN_NOTICE)).toBeVisible();
       await expect(
-        page.getByRole("heading", { name: /^Загадай слово /u }),
+        page.getByRole("heading", { name: /^Загадайте слово для игрока: /u }),
         `заголовок без имени адресата (${player.name})`,
       ).toHaveCount(0);
       for (const viewerName of VIEWER_NAMES) {
@@ -185,7 +183,7 @@ test("скрытие адресатов: нет связки автор→адр
       await player.page.locator("#word-input").fill(WORDS[player.name]);
       await player.page.getByRole("button", { name: "Сохранить слово" }).click();
       await expect(
-        player.page.locator("header").getByText("Слово сохранено", { exact: true }),
+        player.page.locator("header").getByText(/Слова сохранены: [1-9]\d* из 4/u),
       ).toBeVisible();
     }
     const sasha = byName(players, "Саша");
@@ -209,7 +207,7 @@ test("скрытие адресатов: нет связки автор→адр
       const ownHint = page.locator("li").filter({ hasText: "вам" });
       await expect(ownHint, `одна подсказка «вам» для ${player.name}`).toHaveCount(1);
       await expect(ownHint).toContainText(assignment.authorName);
-      await expect(ownHint).toContainText("слово скрыто");
+      await expect(ownHint).toContainText("Ваше слово скрыто");
       await expect(page.locator("body")).not.toContainText(assignment.authorWord);
       for (const viewerName of VIEWER_NAMES) {
         if (viewerName !== assignment.authorName) {

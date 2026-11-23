@@ -1,5 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 
+import { newBrowserContext } from "./helpers";
+
 // Live-интеграция GameRoom на уровне лобби: два независимых браузерных
 // контекста. Проверяет серверный рендер комнаты по cookie, форму входа с
 // предзаполненным кодом, синхронизацию готовности через SSE, перезагрузку
@@ -20,11 +22,8 @@ function watchConsole(page: Page, errors: string[]): void {
 
 async function createGameViaUi(host: Page, name: string): Promise<string> {
   await host.goto("/");
-  const createSection = host.locator("section", {
-    has: host.getByRole("heading", { name: "Создать игру" }),
-  });
-  await createSection.getByLabel("Ваше имя").fill(name);
-  await createSection.getByRole("button", { name: "Создать игру" }).click();
+  await host.locator("#player-name").fill(name);
+  await host.getByRole("button", { name: "Создать комнату" }).click();
   await expect(host.getByRole("heading", { name: "Лобби" })).toBeVisible();
   const code = new URL(host.url()).pathname.split("/").at(-1) ?? "";
   expect(code).toMatch(/^[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{6}$/u);
@@ -35,8 +34,8 @@ test("лобби: вход по коду, синхронизация готов�
   browser,
 }) => {
   const consoleErrors: string[] = [];
-  const hostContext = await browser.newContext({ viewport: { width: 360, height: 740 } });
-  const guestContext = await browser.newContext();
+  const hostContext = await newBrowserContext(browser, { viewport: { width: 360, height: 740 } });
+  const guestContext = await newBrowserContext(browser);
   const host = await hostContext.newPage();
   const guest = await guestContext.newPage();
   watchConsole(host, consoleErrors);
@@ -63,7 +62,7 @@ test("лобби: вход по коду, синхронизация готов�
     expect(await host.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(360);
 
     // Готовность гостя синхронизируется на хоста через SSE, без перезагрузки.
-    await guest.locator("#ready-switch").click();
+    await guest.locator("#ready-button").click();
     await expect(
       host.getByRole("listitem").filter({ hasText: "Петя" }).getByText("Готов", { exact: true }),
     ).toBeVisible();
@@ -102,7 +101,7 @@ test("лобби: вход по коду, синхронизация готов�
 
 test("лобби: кнопка копирования записывает только код комнаты", async ({ browser }) => {
   const consoleErrors: string[] = [];
-  const context = await browser.newContext();
+  const context = await newBrowserContext(browser);
   await context.addInitScript(() => {
     Object.defineProperty(navigator, "share", { configurable: true, value: undefined });
     Object.defineProperty(navigator, "clipboard", {
@@ -123,7 +122,7 @@ test("лобби: кнопка копирования записывает то�
     await page.getByRole("button", { name: "Скопировать приглашение" }).click();
 
     await expect(page.locator("html")).toHaveAttribute("data-copied-text", code);
-    await expect(page.getByRole("button", { name: "Скопировано" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Код скопирован" })).toBeVisible();
     expect(consoleErrors).toEqual([]);
   } finally {
     await context.close();
@@ -134,7 +133,7 @@ test("лобби: отказ доступа к буферу обмена пок�
   browser,
 }) => {
   const consoleErrors: string[] = [];
-  const context = await browser.newContext();
+  const context = await newBrowserContext(browser);
   await context.addInitScript(() => {
     Object.defineProperty(navigator, "share", { configurable: true, value: undefined });
     Object.defineProperty(navigator, "clipboard", {
@@ -165,8 +164,8 @@ test("комната: форма входа без членства, 404 для 
   browser,
 }) => {
   const consoleErrors: string[] = [];
-  const hostContext = await browser.newContext();
-  const guestContext = await browser.newContext();
+  const hostContext = await newBrowserContext(browser);
+  const guestContext = await newBrowserContext(browser);
   const host = await hostContext.newPage();
   const guest = await guestContext.newPage();
   watchConsole(host, consoleErrors);
@@ -198,7 +197,7 @@ test("комната: форма входа без членства, 404 для 
     await expect(guest.getByRole("heading", { name: "Лобби" })).toBeVisible();
 
     // Участник другой комнаты по cookie получает форму входа, а не чужое лобби.
-    const otherContext = await browser.newContext();
+    const otherContext = await newBrowserContext(browser);
     const other = await otherContext.newPage();
     watchConsole(other, consoleErrors);
     try {
@@ -212,6 +211,68 @@ test("комната: форма входа без членства, 404 для 
     } finally {
       await otherContext.close();
     }
+
+    expect(consoleErrors).toEqual([]);
+  } finally {
+    await hostContext.close();
+    await guestContext.close();
+  }
+});
+
+test("лобби: хост удаляет участника из его строки; гость теряет членство и может войти снова", async ({
+  browser,
+}) => {
+  const consoleErrors: string[] = [];
+  const hostContext = await newBrowserContext(browser);
+  const guestContext = await newBrowserContext(browser);
+  const host = await hostContext.newPage();
+  const guest = await guestContext.newPage();
+  watchConsole(host, consoleErrors);
+  watchConsole(guest, consoleErrors);
+
+  try {
+    const code = await createGameViaUi(host, "Маша");
+    await guest.goto(`/game/${code}`);
+    await guest.getByLabel("Ваше имя").fill("Петя");
+    await guest.getByRole("button", { name: "Подключиться" }).click();
+    await expect(guest.getByRole("heading", { name: "Лобби" })).toBeVisible();
+    await expect(host.getByText("Участники (2/12)")).toBeVisible();
+
+    // Кнопка удаления — в строке Пети; удалить себя нельзя.
+    const kickButton = host.getByRole("button", { name: "Удалить участника «Петя»" });
+    await expect(
+      host.getByRole("listitem").filter({ has: kickButton }),
+      "кнопка удаления находится в строке Пети",
+    ).toBeVisible();
+    await expect(host.getByRole("button", { name: "Удалить участника «Маша»" })).toHaveCount(0);
+
+    // Сначала отмена диалога: состав не меняется.
+    await kickButton.click();
+    const kickDialog = host.getByRole("alertdialog");
+    await expect(kickDialog).toContainText("Удалить участника «Петя»?");
+    await kickDialog.getByRole("button", { name: "Отмена" }).click();
+    await expect(host.getByText("Участники (2/12)")).toBeVisible();
+
+    // Подтверждение исключает Петю; у гостя членство потеряно — персональный
+    // /state отвечает 403, клиент показывает баннер обновления состояния.
+    await kickButton.click();
+    await host
+      .getByRole("alertdialog")
+      .getByRole("button", { name: "Удалить" })
+      .click();
+    await expect(host.getByText("Участники (1/12)")).toBeVisible();
+    await expect(host.getByText("Петя", { exact: true })).toHaveCount(0);
+    await expect(
+      guest.getByRole("alert").filter({ hasText: "Не удалось обновить состояние игры" }),
+    ).toBeVisible();
+
+    // Исключённый по прежнему коду входит как новый игрок.
+    await guest.reload();
+    await expect(guest.locator("#join-code")).toHaveValue(code);
+    await guest.getByLabel("Ваше имя").fill("Петя");
+    await guest.getByRole("button", { name: "Подключиться" }).click();
+    await expect(guest.getByRole("heading", { name: "Лобби" })).toBeVisible();
+    await expect(host.getByText("Участники (2/12)")).toBeVisible();
 
     expect(consoleErrors).toEqual([]);
   } finally {

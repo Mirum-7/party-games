@@ -153,6 +153,7 @@ function makeGameState(revision: number): GameStateResponse {
       canMarkGuessed: true,
       canFinish: false,
       canCancel: false,
+      canRestart: false,
       canLeave: true,
     },
   };

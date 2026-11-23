@@ -102,6 +102,7 @@ const gameStateResponseSchema = z.object({
     canMarkGuessed: z.boolean(),
     canFinish: z.boolean(),
     canCancel: z.boolean(),
+    canRestart: z.boolean(),
     canLeave: z.boolean(),
   }),
 });

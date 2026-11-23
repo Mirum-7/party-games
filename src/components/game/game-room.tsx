@@ -15,6 +15,13 @@ import { WordSetup } from "@/components/game/word-chain/word-setup";
 import { Button } from "@/components/ui/button";
 import type { GameStateResponse, UpdateSettingsRequest } from "@/shared/contracts/game";
 
+// Общий баннер комнаты: свежая ошибка выхода важнее застойной ошибки мутации
+// или обновления — иначе leave-ошибку маскирует прежний mutationError, и
+// пользователь не видит причину отказа выхода.
+export function roomErrorMessage(errorMessage: string | null, leaveError: string | null): string | null {
+  return leaveError ?? errorMessage;
+}
+
 export type GameRoomViewProps = {
   game: GameStateResponse;
   connectionStatus: ConnectionStatus;
@@ -27,6 +34,7 @@ export type GameRoomViewProps = {
   onStart: () => Promise<void>;
   onRemove: (playerId: string) => Promise<void>;
   onLeave: () => Promise<void>;
+  onRestart: () => Promise<void>;
   onSubmitWord: (word: string) => Promise<void>;
   onCancel: () => Promise<void>;
   onGuessed: () => Promise<void>;
@@ -46,6 +54,7 @@ export function GameRoomView({
   onStart,
   onRemove,
   onLeave,
+  onRestart,
   onSubmitWord,
   onCancel,
   onGuessed,
@@ -87,7 +96,14 @@ export function GameRoomView({
       );
       break;
     case "FINISHED":
-      screen = <FinalResults state={game} />;
+      screen = (
+        <FinalResults
+          state={game}
+          mutationPending={mutationPending}
+          onRestart={onRestart}
+          onLeave={onLeave}
+        />
+      );
       break;
   }
 
@@ -132,6 +148,9 @@ export function GameRoom({ code, initialState }: GameRoomProps) {
     initialState,
   );
   const [leaveError, setLeaveError] = React.useState<string | null>(null);
+  // Выход идёт через отдельный helper без mutationPending: держим собственный
+  // флаг, чтобы блокировать финальные кнопки и защищать повторный запуск.
+  const [leavePending, setLeavePending] = React.useState(false);
 
   // Контроллер уже записал message ошибки в errorMessage; повторный throw
   // превратился бы в unhandled rejection из обработчиков экранов.
@@ -176,10 +195,18 @@ export function GameRoom({ code, initialState }: GameRoomProps) {
     () => runGuarded(() => mutate("POST", "/finish")),
     [mutate, runGuarded],
   );
+  const handleRestart = React.useCallback(
+    () => runGuarded(() => mutate("POST", "/restart")),
+    [mutate, runGuarded],
+  );
 
   // Выход — единственное действие с ответом 204 без тела: используем
-  // специальный хелпер, при успехе уходим на главную.
+  // специальный хелпер, при успехе уходим на главную. Повторный запуск
+  // заблокирован, pending снимается в finally; навигация на `/` — только
+  // после успешного 204.
   const handleLeave = React.useCallback(async (): Promise<void> => {
+    if (leavePending) return;
+    setLeavePending(true);
     try {
       await leaveGame(code);
       setLeaveError(null);
@@ -190,21 +217,24 @@ export function GameRoom({ code, initialState }: GameRoomProps) {
           ? error.message
           : "Не удалось выйти из игры. Попробуйте ещё раз.",
       );
+    } finally {
+      setLeavePending(false);
     }
-  }, [code, router]);
+  }, [code, leavePending, router]);
 
   return (
     <GameRoomView
       game={game}
       connectionStatus={connectionStatus}
-      mutationPending={mutationPending}
-      errorMessage={errorMessage ?? leaveError}
+      mutationPending={mutationPending || leavePending}
+      errorMessage={roomErrorMessage(errorMessage, leaveError)}
       refresh={refresh}
       onToggleReady={handleToggleReady}
       onUpdateSettings={handleUpdateSettings}
       onStart={handleStart}
       onRemove={handleRemove}
       onLeave={handleLeave}
+      onRestart={handleRestart}
       onSubmitWord={handleSubmitWord}
       onCancel={handleCancel}
       onGuessed={handleGuessed}

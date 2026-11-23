@@ -19,6 +19,17 @@ export type GameProjectInput = {
   results: GameResult[]; // Core-owned, нужны модулю для его проекции
 };
 
+// Core-owned capabilities: их значения вычисляет Core из роли viewer и
+// публичной фазы. Игровой модуль обязан их не задавать и не может
+// переопределить через свою проекцию.
+export type CoreOwnedCapabilities = Pick<
+  Capabilities,
+  "canEditSettings" | "canManagePlayers" | "canStart" | "canRestart" | "canLeave"
+>;
+
+// Capabilities, которые игровой модуль вправе выставлять в своей проекции.
+export type GameModuleCapabilities = Omit<Capabilities, keyof CoreOwnedCapabilities>;
+
 // Результат проекции игрового модуля. Поле submittedWordPlayerIds служебное:
 // Core строит им флаги PlayerSummary.hasSubmittedWord и не сериализует его
 // в GameStateResponse.
@@ -29,7 +40,7 @@ export type GameProjectedState = {
   setup: SetupState | null;
   hints: HintItem[] | null;
   results: ResultItem[] | null;
-  capabilities: Partial<Capabilities>;
+  capabilities: Partial<GameModuleCapabilities>;
   submittedWordPlayerIds: readonly string[];
 };
 
@@ -42,5 +53,6 @@ export type GameDefinition = {
   readonly maxPlayers: 12;
   createGame(tx: TransactionClient, gameId: string): Promise<void>;
   updateSettings(tx: TransactionClient, gameId: string, input: unknown): Promise<boolean>;
+  resetAttempt(tx: TransactionClient, gameId: string): Promise<void>;
   project(tx: TransactionClient, input: GameProjectInput): Promise<GameProjectedState>;
 };

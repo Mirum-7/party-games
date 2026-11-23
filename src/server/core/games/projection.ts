@@ -78,6 +78,14 @@ export function buildGameStateResponse(input: {
   const playerCount = players.length;
 
   const capabilities: Capabilities = {
+    canSubmitWord: false,
+    canMarkGuessed: false,
+    canFinish: false,
+    canCancel: false,
+    ...projected.capabilities,
+    // Core-owned флаги применяются после module capabilities: модуль не может
+    // их переопределить через свою проекцию (тип это уже запрещает, порядок —
+    // fail-closed защита вглубь).
     canEditSettings: isHost && inLobby,
     canManagePlayers: isHost && inLobby,
     canStart:
@@ -86,12 +94,8 @@ export function buildGameStateResponse(input: {
       playerCount >= definition.minPlayers &&
       playerCount <= definition.maxPlayers &&
       players.every((player) => player.isReady),
-    canSubmitWord: false,
-    canMarkGuessed: false,
-    canFinish: false,
-    canCancel: false,
-    canLeave: inLobby,
-    ...projected.capabilities,
+    canRestart: isHost && projected.phase === "FINISHED",
+    canLeave: inLobby || projected.phase === "FINISHED",
   };
 
   return {

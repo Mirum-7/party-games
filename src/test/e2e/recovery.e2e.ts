@@ -6,6 +6,7 @@ import {
   APP_ORIGIN,
   e2eFetch,
   joinGameViaApi,
+  newBrowserContext,
   newScenarioContext,
   originHeaders,
   type ErrorBody,
@@ -20,9 +21,9 @@ import {
 
 const PHASE_HEADING = {
   LOBBY: "Лобби",
-  ASSIGNING_WORDS: /Загадай слово|Введи загаданное слово/u,
+  ASSIGNING_WORDS: /^(?:Загадайте слово для игрока: .+|Введите загаданное слово)$/u,
   PLAYING: "Игра идёт",
-  FINISHED: "Результаты",
+  FINISHED: "Игра завершена",
 } as const;
 
 function watchConsole(page: Page, errors: string[]): void {
@@ -63,11 +64,8 @@ async function expectIdentityRestored(page: Page, name: string): Promise<void> {
 
 async function createRoomWithHostViaUi(page: Page): Promise<string> {
   await page.goto("/");
-  const createSection = page.locator("section", {
-    has: page.getByRole("heading", { name: "Создать игру" }),
-  });
-  await createSection.getByLabel("Ваше имя").fill("Маша");
-  await createSection.getByRole("button", { name: "Создать игру" }).click();
+  await page.locator("#player-name").fill("Маша");
+  await page.getByRole("button", { name: "Создать комнату" }).click();
   await expect(page.getByRole("heading", { name: "Лобби" })).toBeVisible();
   const code = new URL(page.url()).pathname.split("/").at(-1) ?? "";
   expect(code).toMatch(/^[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{6}$/u);
@@ -97,7 +95,7 @@ test("перезагрузка в LOBBY и ASSIGNING_WORDS: фаза, ревиз
 }) => {
   test.setTimeout(90_000);
   const consoleErrors: string[] = [];
-  const context = await browser.newContext();
+  const context = await newBrowserContext(browser);
   const page = await context.newPage();
   watchConsole(page, consoleErrors);
   const petya = await newScenarioContext();
@@ -154,7 +152,7 @@ test("перезагрузка в LOBBY и ASSIGNING_WORDS: фаза, ревиз
     expect(lobbyAfterVanya.players.filter((player) => player.isHost)).toHaveLength(1);
 
     // --- ASSIGNING_WORDS ---
-    await page.locator("#ready-switch").click();
+    await page.locator("#ready-button").click();
     await expect(page.getByText("Готов", { exact: true })).toBeVisible();
     await setReadyViaApi(petya, code);
     await page.getByRole("button", { name: "Начать игру" }).click();
@@ -163,7 +161,7 @@ test("перезагрузка в LOBBY и ASSIGNING_WORDS: фаза, ревиз
     // Маша вводит слово с лишними пробелами: сервер нормализует (trim).
     await page.locator("#word-input").fill("  пирамида  ");
     await page.getByRole("button", { name: "Сохранить слово" }).click();
-    await expect(page.locator("header").getByText("Слово сохранено", { exact: true })).toBeVisible();
+    await expect(page.locator("header").getByText("Слова сохранены: 1 из 3", { exact: true })).toBeVisible();
     await expect(page.locator("#word-input")).toHaveValue("пирамида");
 
     const setupState = await fetchStateInPage(page, code);
@@ -177,7 +175,7 @@ test("перезагрузка в LOBBY и ASSIGNING_WORDS: фаза, ревиз
     await expectIdentityRestored(page, "Маша");
     // Разрешённое слово восстановлено сервером в нормализованном виде.
     await expect(page.locator("#word-input")).toHaveValue("пирамида");
-    await expect(page.locator("header").getByText("Слово сохранено", { exact: true })).toBeVisible();
+    await expect(page.locator("header").getByText("Слова сохранены: 1 из 3", { exact: true })).toBeVisible();
     // Capabilities восстановлены: сохранение доступно, отмена — админу.
     await expect(page.getByRole("button", { name: "Сохранить слово" })).toBeEnabled();
     await expect(page.getByRole("button", { name: "Отменить попытку" })).toBeVisible();
@@ -198,7 +196,7 @@ test("перезагрузка в PLAYING и FINISHED: состояние сох
 }) => {
   test.setTimeout(90_000);
   const consoleErrors: string[] = [];
-  const context = await browser.newContext();
+  const context = await newBrowserContext(browser);
   const page = await context.newPage();
   watchConsole(page, consoleErrors);
   const petya = await newScenarioContext();
@@ -208,7 +206,7 @@ test("перезагрузка в PLAYING и FINISHED: состояние сох
     const code = await createRoomWithHostViaUi(page);
     await joinGameViaApi(petya, code, "Петя");
     await joinGameViaApi(vanya, code, "Ваня");
-    await page.locator("#ready-switch").click();
+    await page.locator("#ready-button").click();
     await setReadyViaApi(petya, code);
     await setReadyViaApi(vanya, code);
     await page.getByRole("button", { name: "Начать игру" }).click();
@@ -216,7 +214,7 @@ test("перезагрузка в PLAYING и FINISHED: состояние сох
 
     await page.locator("#word-input").fill("пирамида");
     await page.getByRole("button", { name: "Сохранить слово" }).click();
-    await expect(page.locator("header").getByText("Слово сохранено", { exact: true })).toBeVisible();
+    await expect(page.locator("header").getByText("Слова сохранены: 1 из 3", { exact: true })).toBeVisible();
     await submitWordViaApi(petya, code, "ракета");
     await submitWordViaApi(vanya, code, "телескоп");
     await expect(page.getByRole("heading", { name: PHASE_HEADING.PLAYING })).toBeVisible();
@@ -236,7 +234,7 @@ test("перезагрузка в PLAYING и FINISHED: состояние сох
     // Персональная проекция восстановлена: своё слово по-прежнему скрыто.
     const ownHint = page.locator("li").filter({ hasText: "вам" });
     await expect(ownHint).toHaveCount(1);
-    await expect(ownHint).toContainText("слово скрыто");
+    await expect(ownHint).toContainText("Ваше слово скрыто");
     // Скрыто ровно то слово, которое адресовано Маше: автор читается из
     // строки «вам», остальные слова видны.
     const ownHintText = (await ownHint.innerText()).replace("вам", "");
@@ -257,10 +255,10 @@ test("перезагрузка в PLAYING и FINISHED: состояние сох
       .getByRole("alertdialog")
       .getByRole("button", { name: "Я угадал" })
       .click();
-    await expect(page.getByText("Вы уже угадали своё слово")).toBeVisible();
+    await expect(page.getByText("Теперь вы зритель")).toBeVisible();
 
     await page.reload();
-    await expect(page.getByText("Вы уже угадали своё слово")).toBeVisible();
+    await expect(page.getByText("Теперь вы зритель")).toBeVisible();
     await expect(page.getByRole("button", { name: "Я угадал" })).toHaveCount(0);
     await expectLocalStorageEmpty(page);
     const guessedState = await fetchStateInPage(page, code);
@@ -279,7 +277,7 @@ test("перезагрузка в PLAYING и FINISHED: состояние сох
     await expect(page.locator("ol > li")).toHaveCount(3);
     await expect(page.locator("ol > li").first()).toContainText("1 место");
     await expect(page.locator("ol > li").first()).toContainText("Маша");
-    await expect(page.locator("ol > li").first()).toContainText("Очки: 3");
+    await expect(page.locator('ol > li [aria-label="Очки: 3"]')).toBeVisible();
     // После финала слова раскрыты, интерактивных действий не осталось.
     await expect(page.getByRole("heading", { name: "Все слова" })).toBeVisible();
     for (const word of ["пирамида", "ракета", "телескоп"]) {
@@ -295,7 +293,7 @@ test("перезагрузка в PLAYING и FINISHED: состояние сох
     });
 
     // --- Новый контекст не наследует личность ---
-    const strangerContext = await browser.newContext();
+    const strangerContext = await newBrowserContext(browser);
     const stranger = await strangerContext.newPage();
     watchConsole(stranger, consoleErrors);
     try {
@@ -324,7 +322,7 @@ test("разрыв SSE: пропущенное событие восстанав
 }) => {
   test.setTimeout(120_000);
   const consoleErrors: string[] = [];
-  const mashaContext = await browser.newContext();
+  const mashaContext = await newBrowserContext(browser);
   const page = await mashaContext.newPage();
   watchConsole(page, consoleErrors);
   const petya = await newScenarioContext();
@@ -397,7 +395,7 @@ test("разрыв SSE: пропущенное событие восстанав
       .filter((event) => event.kind === "state-200");
     expect(stateDuringBlock).toEqual([]);
     await expect(
-      page.getByRole("listitem").filter({ hasText: "Петя" }).getByText("Не готов", { exact: true }),
+      page.getByRole("listitem").filter({ hasText: "Петя" }).getByText("Пока не готов", { exact: true }),
     ).toBeVisible();
 
     // Восстановление маршрута: авто-retry EventSource открывает поток заново,
@@ -447,7 +445,7 @@ test("опоздавший ответ /state со старой ревизией 
 }) => {
   test.setTimeout(90_000);
   const consoleErrors: string[] = [];
-  const context = await browser.newContext();
+  const context = await newBrowserContext(browser);
   const page = await context.newPage();
   watchConsole(page, consoleErrors);
   const petya = await newScenarioContext();

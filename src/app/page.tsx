@@ -6,7 +6,7 @@ export default function HomePage() {
       <div className="flex flex-col gap-1 text-center">
         <h1 className="text-2xl font-semibold tracking-tight">Words Game</h1>
         <p className="text-muted-foreground">
-          Мобильная party-игра: загадывайте слова по кругу, объясняйте вживую.
+          Загадывайте слова друзьям, объясняйте вживую и угадывайте своё.
         </p>
       </div>
       <HomeFormsFlow />

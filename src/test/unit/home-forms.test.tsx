@@ -1,34 +1,40 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, mock, test } from "bun:test";
 import { renderToString } from "react-dom/server";
 
-import { HomeForms } from "@/components/game/home-forms";
 import { normalizeInviteCode } from "@/components/game/join-form";
 
-// Фокусные SSR-тесты разметки и чистых хелперов. Они не доказывают работу
-// кликов, навигации или SSE — live E2E отложен до интеграции с Task 9.
+// Фокусные SSR-тесты разметки домашней страницы и чистых хелперов.
+// E2E-facing contract: создание комнаты и подключение по коду используют одно
+// общее поле имени (#player-name); поведение в браузере покрывают E2E-сценарии.
+
+mock.module("next/navigation", () => ({
+  useRouter: () => ({ push: () => Promise.resolve(true) }),
+}));
+
+const { default: HomePage } = await import("@/app/page");
 
 function renderHomeForms() {
-  const noop = () => Promise.resolve("K7Q2MN");
-  return renderToString(
-    <HomeForms onCreate={noop} onJoin={() => Promise.resolve()} />,
-  );
+  return renderToString(<HomePage />);
 }
 
 describe("HomeForms", () => {
-  test("показывает две разделённые операции: создать и подключиться", () => {
+  test("одно общее поле имени на обе операции: создать и подключиться", () => {
     const html = renderHomeForms();
-    expect(html).toContain("Создать игру");
+    expect(html.match(/id="player-name"/g)).toHaveLength(1);
+    expect(html).toContain("Создать комнату");
     expect(html).toContain("Подключиться по коду");
+    expect(html).toContain("Загадывайте слова друзьям");
     // Два независимых формуляра, чтобы операции не смешивались.
-    expect(html.match(/<form/g)?.length).toBe(2);
+    expect(html.match(/<form/g)).toHaveLength(2);
   });
 
   test("поля имени и кода имеют постоянные связанные label", () => {
     const html = renderHomeForms();
     expect(html).toContain("Ваше имя");
     expect(html).toContain("Код приглашения");
+    expect(html).toMatch(/<label[^>]*for="player-name"/);
     expect(html).toMatch(/<label[^>]*for=/);
-    expect(html).toMatch(/id="[^"]*name"/);
+    expect(html).toMatch(/id="player-name"/);
     expect(html).toMatch(/id="[^"]*code"/);
   });
 
@@ -43,6 +49,16 @@ describe("HomeForms", () => {
     const html = renderHomeForms();
     expect(html).toContain("max-w-md");
     expect(html).toContain("flex-col");
+  });
+
+  test("подключиться — второстепенная кнопка, создание — primary", () => {
+    const html = renderHomeForms();
+    expect(html).toMatch(
+      /<button[^>]*data-variant="default"[^>]*>Создать комнату<\/button>/,
+    );
+    expect(html).toMatch(
+      /<button[^>]*data-variant="secondary"[^>]*>Подключиться<\/button>/,
+    );
   });
 });
 

@@ -98,6 +98,7 @@ function makeGameState(revision: number, phase: GamePhase = "PLAYING"): GameStat
       canMarkGuessed: true,
       canFinish: false,
       canCancel: false,
+      canRestart: false,
       canLeave: true,
     },
   };

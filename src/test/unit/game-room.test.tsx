@@ -3,6 +3,7 @@ import { renderToString } from "react-dom/server";
 
 import {
   GameRoomView,
+  roomErrorMessage,
   type GameRoomViewProps,
 } from "@/components/game/game-room";
 import type {
@@ -52,7 +53,8 @@ function makeState(phase: GamePhase): GameStateResponse {
       canMarkGuessed: phase === "PLAYING",
       canFinish: phase === "PLAYING",
       canCancel: phase === "ASSIGNING_WORDS",
-      canLeave: phase === "LOBBY",
+      canRestart: false,
+      canLeave: phase === "LOBBY" || phase === "FINISHED",
     },
   };
 }
@@ -69,6 +71,7 @@ function makeView(overrides: Partial<GameRoomViewProps> = {}): GameRoomViewProps
     onStart: () => Promise.resolve(),
     onRemove: () => Promise.resolve(),
     onLeave: () => Promise.resolve(),
+    onRestart: () => Promise.resolve(),
     onSubmitWord: () => Promise.resolve(),
     onCancel: () => Promise.resolve(),
     onGuessed: () => Promise.resolve(),
@@ -86,11 +89,37 @@ describe("GameRoomView", () => {
       );
       expect(html).toContain("Подключено");
       if (phase === "LOBBY") expect(html).toContain("Лобби");
-      if (phase === "ASSIGNING_WORDS") expect(html).toContain("Загадай слово Петя");
+      if (phase === "ASSIGNING_WORDS") expect(html).toContain("Загадайте слово для игрока: Петя");
       if (phase === "PLAYING") expect(html).toContain("Игра идёт");
       if (phase === "FINISHED") expect(html).toContain("Результаты");
     },
   );
+
+  test("финал: хост видит рестарт, не-хост — пояснение хоста и выход в главное меню", () => {
+    const hostState = makeState("FINISHED");
+    hostState.capabilities = { ...hostState.capabilities, canRestart: true };
+    const hostHtml = renderToString(<GameRoomView {...makeView({ game: hostState })} />);
+    expect(hostHtml).toContain("Игра завершена");
+    expect(hostHtml).toContain("Сыграть ещё с этим составом");
+    expect(hostHtml).toContain("В главное меню");
+
+    const guestHtml = renderToString(
+      <GameRoomView {...makeView({ game: makeState("FINISHED") })} />,
+    );
+    expect(guestHtml).not.toContain("Сыграть ещё с этим составом");
+    expect(guestHtml).toContain("Хост может вернуть всех в лобби для нового раунда");
+    expect(guestHtml).toContain("В главное меню");
+  });
+
+  test("pending блокирует финальные действия рестарта и выхода", () => {
+    const state = makeState("FINISHED");
+    state.capabilities = { ...state.capabilities, canRestart: true };
+    const html = renderToString(
+      <GameRoomView {...makeView({ game: state, mutationPending: true })} />,
+    );
+    expect(html).toContain("Возвращаем в лобби…");
+    expect(html.match(/disabled=""/g)?.length).toBeGreaterThanOrEqual(2);
+  });
 
   test("ошибка мутации или обновления показана баннером с кнопкой обновления", () => {
     const html = renderToString(
@@ -99,6 +128,15 @@ describe("GameRoomView", () => {
     expect(html).toContain('role="alert"');
     expect(html).toContain("Не удалось выполнить действие");
     expect(html).toContain("Обновить");
+  });
+
+  test("баннер: свежая ошибка выхода не маскируется застойной ошибкой мутации", () => {
+    expect(roomErrorMessage("Ошибка мутации", "Не удалось выйти из игры")).toBe(
+      "Не удалось выйти из игры",
+    );
+    expect(roomErrorMessage(null, "Не удалось выйти из игры")).toBe("Не удалось выйти из игры");
+    expect(roomErrorMessage("Ошибка мутации", null)).toBe("Ошибка мутации");
+    expect(roomErrorMessage(null, null)).toBeNull();
   });
 
   test("переподключение отражает статус соединения", () => {

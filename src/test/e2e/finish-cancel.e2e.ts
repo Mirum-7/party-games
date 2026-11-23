@@ -69,21 +69,22 @@ test("досрочное завершение: угадавшие сохраня
     await finishGameViaUi(mashaPage, pages);
 
     // Финальная таблица на экране админа: места 1–2 с очками 4–3, затем
-    // не угадавшие «Не угадал» с 0 очками, без места и без времени.
+    // не угадавшие «Не угадал» с 0 очками, без места и без времени. Очки
+    // читаются строго по aria-label метки — видимое число в строке дублируется.
     const rows = mashaPage.locator("ol > li");
     await expect(rows).toHaveCount(4);
     await expect(rows.nth(0)).toContainText("1 место");
     await expect(rows.nth(0)).toContainText("Петя");
-    await expect(rows.nth(0)).toContainText("Очки: 4");
+    await expect(rows.nth(0).locator('[aria-label="Очки: 4"]')).toBeVisible();
     await expect(rows.nth(1)).toContainText("2 место");
     await expect(rows.nth(1)).toContainText("Ваня");
-    await expect(rows.nth(1)).toContainText("Очки: 3");
+    await expect(rows.nth(1).locator('[aria-label="Очки: 3"]')).toBeVisible();
     await expect(rows.nth(2)).toContainText("Не угадал");
     await expect(rows.nth(2)).toContainText("Маша");
-    await expect(rows.nth(2)).toContainText("Очки: 0");
+    await expect(rows.nth(2).locator('[aria-label="Очки: 0"]')).toBeVisible();
     await expect(rows.nth(3)).toContainText("Не угадал");
     await expect(rows.nth(3)).toContainText("Саша");
-    await expect(rows.nth(3)).toContainText("Очки: 0");
+    await expect(rows.nth(3).locator('[aria-label="Очки: 0"]')).toBeVisible();
     // У не угадавших время отсутствует (прочерк), у угадавших присутствует
     // как отформатированная длительность «MM:SS».
     await expect(rows.nth(0)).not.toContainText("—");
@@ -133,7 +134,11 @@ test("отмена ввода слов: слова и готовность сб�
     for (const page of pages) await setReadyViaUi(page);
     await startGameViaUi(mashaPage);
     for (const page of pages) {
-      await expect(page.getByRole("heading", { name: /Загадай слово|Введи загаданное слово/u })).toBeVisible();
+      await expect(
+        page.getByRole("heading", {
+          name: /^(?:Загадайте слово для игрока: .+|Введите загаданное слово)$/u,
+        }),
+      ).toBeVisible();
     }
 
     // Часть слов введена до отмены.
@@ -151,14 +156,16 @@ test("отмена ввода слов: слова и готовность сб�
     expect(before.state.game.phase).toBe("ASSIGNING_WORDS");
     const revisionBeforeCancel = before.state.game.revision;
 
-    // Админ сначала возвращается из диалога («Назад») — попытка продолжается.
+    // Админ сначала возвращается из диалога («Отмена») — попытка продолжается.
     await mashaPage.getByRole("button", { name: "Отменить попытку" }).click();
     await mashaPage
       .getByRole("alertdialog")
-      .getByRole("button", { name: "Назад" })
+      .getByRole("button", { name: "Отмена" })
       .click();
     await expect(
-      mashaPage.getByRole("heading", { name: /Загадай слово|Введи загаданное слово/u }),
+      mashaPage.getByRole("heading", {
+        name: /^(?:Загадайте слово для игрока: .+|Введите загаданное слово)$/u,
+      }),
     ).toBeVisible();
     await expect(mashaPage.locator("#word-input")).toHaveValue("самолёт");
 
@@ -178,7 +185,7 @@ test("отмена ввода слов: слова и готовность сб�
     await expect(mashaPage.getByRole("listitem").filter({ hasText: "Маша" }).getByText("Хост")).toBeVisible();
     for (const name of ["Маша", "Петя", "Ваня", "Саша"]) {
       await expect(
-        mashaPage.getByRole("listitem").filter({ hasText: name }).getByText("Не готов", { exact: true }),
+        mashaPage.getByRole("listitem").filter({ hasText: name }).getByText("Пока не готов", { exact: true }),
       ).toBeVisible();
     }
     await expect(mashaPage.getByText("Слово загадано")).toHaveCount(0);

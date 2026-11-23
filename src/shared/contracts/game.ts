@@ -65,6 +65,7 @@ export type Capabilities = {
   canMarkGuessed: boolean;
   canFinish: boolean;
   canCancel: boolean;
+  canRestart: boolean;
   canLeave: boolean;
 };
 

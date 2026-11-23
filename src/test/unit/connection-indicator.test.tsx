@@ -45,6 +45,7 @@ function makeState(): GameStateResponse {
       canMarkGuessed: false,
       canFinish: false,
       canCancel: false,
+      canRestart: false,
       canLeave: true,
     },
   };
@@ -57,6 +58,35 @@ describe("ConnectionIndicator с каноническим ConnectionStatus", () 
       expect(html).toContain(label);
     });
   }
+
+  test("каждый статус показан маленькой видимой точкой рядом с текстом", () => {
+    for (const { status } of STATUSES) {
+      const html = renderToString(<ConnectionIndicator status={status} />);
+      expect(html).toContain("size-2");
+      expect(html).toContain("rounded-full");
+      expect(html).toContain('aria-hidden="true"');
+    }
+  });
+
+  test("переподключение использует warning-вариант", () => {
+    const html = renderToString(<ConnectionIndicator status="reconnecting" />);
+    expect(html).toContain("bg-warning");
+  });
+
+  test("пульсация точки отключается при prefers-reduced-motion", () => {
+    for (const status of ["connecting", "reconnecting"] as const) {
+      const html = renderToString(<ConnectionIndicator status={status} />);
+      expect(html).toContain("animate-pulse");
+      expect(html).toContain("motion-reduce:animate-none");
+    }
+    const connectedHtml = renderToString(<ConnectionIndicator status="connected" />);
+    expect(connectedHtml).not.toContain("animate-pulse");
+  });
+
+  test("установленное соединение использует success-вариант", () => {
+    const html = renderToString(<ConnectionIndicator status="connected" />);
+    expect(html).toContain("bg-success");
+  });
 });
 
 describe("GameRoomView принимает каждый канонический статус", () => {
@@ -75,6 +105,7 @@ describe("GameRoomView принимает каждый канонический 
           onStart={() => Promise.resolve()}
           onRemove={() => Promise.resolve()}
           onLeave={() => Promise.resolve()}
+          onRestart={() => Promise.resolve()}
           onSubmitWord={() => Promise.resolve()}
           onCancel={() => Promise.resolve()}
           onGuessed={() => Promise.resolve()}

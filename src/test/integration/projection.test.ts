@@ -206,6 +206,7 @@ function capabilities(partial: Partial<Capabilities>): Capabilities {
     canMarkGuessed: false,
     canFinish: false,
     canCancel: false,
+    canRestart: false,
     canLeave: false,
     ...partial,
   };
@@ -643,7 +644,9 @@ describe("getGameState: FINISHED", () => {
       expect(state.players).toEqual(
         expectedPlayers({ room, orderedIds, ready: ALL_VIEWERS, submitted: ALL_VIEWERS, guessed: ALL_VIEWERS }),
       );
-      expect(state.capabilities).toEqual(capabilities({}));
+      expect(state.capabilities).toEqual(
+        capabilities({ canRestart: key === room.hostKey, canLeave: true }),
+      );
       expectSecretsPresent(JSON.stringify(state), ALL_SECRETS);
     }
   });
@@ -704,7 +707,9 @@ describe("getGameState: FINISHED", () => {
       expect(state.players).toEqual(
         expectedPlayers({ room, orderedIds, ready: ALL_VIEWERS, submitted: ALL_VIEWERS, guessed }),
       );
-      expect(state.capabilities).toEqual(capabilities({}));
+      expect(state.capabilities).toEqual(
+        capabilities({ canRestart: key === room.hostKey, canLeave: true }),
+      );
       expectSecretsPresent(JSON.stringify(state), ALL_SECRETS);
     }
   });

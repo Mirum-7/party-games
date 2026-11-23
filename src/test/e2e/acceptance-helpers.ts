@@ -6,6 +6,7 @@ import {
   APP_ORIGIN,
   createGameViaApi,
   joinGameViaApi,
+  newBrowserContext,
   newScenarioContext,
   nextScenarioIp,
   originHeaders,
@@ -37,8 +38,8 @@ export type IndependentContexts = {
   close: () => Promise<void>;
 };
 
-// N полностью независимых браузерных контекстов (отдельные cookie-хранилища),
-// порядок страниц соответствует порядку имён.
+// N полностью независимых браузерных контекстов (отдельные cookie-хранилища
+// и свой x-forwarded-for), порядок страниц соответствует порядку имён.
 export async function openIndependentContexts(
   browser: Browser,
   names: readonly string[],
@@ -47,7 +48,7 @@ export async function openIndependentContexts(
   const contexts: BrowserContext[] = [];
   const pages: Page[] = [];
   for (let index = 0; index < names.length; index += 1) {
-    const context = await browser.newContext();
+    const context = await newBrowserContext(browser);
     const page = await context.newPage();
     watchConsole(page, consoleErrors);
     contexts.push(context);
@@ -65,13 +66,16 @@ export async function openIndependentContexts(
 
 // --- UI-проходы production-экранов ------------------------------------------
 
+// Заголовок ввода слов: «Загадайте слово для игрока: Имя» либо, при скрытом
+// адресате, «Введите загаданное слово».
+export const WORD_SETUP_HEADING = /^(?:Загадайте слово для игрока: .+|Введите загаданное слово)$/u;
+
 export async function createGameViaUi(page: Page, name: string): Promise<string> {
   await page.goto("/");
-  const createSection = page.locator("section", {
-    has: page.getByRole("heading", { name: "Создать игру" }),
-  });
-  await createSection.getByLabel("Ваше имя").fill(name);
-  await createSection.getByRole("button", { name: "Создать игру" }).click();
+  // На главной одно общее поле имени над обеими операциями: и создание, и
+  // подключение используют его значение.
+  await page.locator("#player-name").fill(name);
+  await page.getByRole("button", { name: "Создать комнату" }).click();
   await expect(page.getByRole("heading", { name: "Лобби" })).toBeVisible();
   const code = new URL(page.url()).pathname.split("/").at(-1) ?? "";
   expect(code).toMatch(/^[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{6}$/u);
@@ -87,16 +91,17 @@ export async function joinViaUi(page: Page, code: string, name: string): Promise
 }
 
 export async function setReadyViaUi(page: Page): Promise<void> {
-  await page.locator("#ready-switch").click();
+  await page.locator("#ready-button").click();
 }
 
 export async function startGameViaUi(hostPage: Page): Promise<void> {
   await hostPage.getByRole("button", { name: "Начать игру" }).click();
-  await expect(hostPage.getByRole("heading", { name: /Загадай слово|Введи загаданное слово/u })).toBeVisible();
+  await expect(hostPage.getByRole("heading", { name: WORD_SETUP_HEADING })).toBeVisible();
 }
 
-// Первые n-1 участников остаются во вводе слов со бейджем «Слово сохранено»,
-// последнее слово атомарно переводит всех в PLAYING.
+// Первые n-1 участников остаются во вводе слов с прогрессом «Слова сохранены»
+// и бейджем «Слово готово» в своей строке; последнее слово атомарно переводит
+// всех в PLAYING.
 export async function submitWordViaUi(page: Page, word: string, isLastSubmitter: boolean): Promise<void> {
   await page.locator("#word-input").fill(word);
   await page.getByRole("button", { name: "Сохранить слово" }).click();
@@ -104,9 +109,16 @@ export async function submitWordViaUi(page: Page, word: string, isLastSubmitter:
     await expect(page.getByRole("heading", { name: "Игра идёт" })).toBeVisible();
   } else {
     await expect(
-      page.locator("header").getByText("Слово сохранено", { exact: true }),
+      page.locator("header").getByText(/Слова сохранены: [1-9]\d* из \d+/u),
     ).toBeVisible();
     await expect(page.locator("#word-input")).toHaveValue(word);
+    // Сохранённое состояние видно и в строке автора, а не только цветом шапки.
+    await expect(
+      page
+        .getByRole("listitem")
+        .filter({ has: page.getByText("Вы", { exact: true }) })
+        .getByText("Слово готово", { exact: true }),
+    ).toBeVisible();
   }
 }
 
@@ -118,8 +130,8 @@ export async function guessViaUi(page: Page): Promise<void> {
     .click();
   await expect(
     page
-      .getByText("Вы уже угадали своё слово")
-      .or(page.getByRole("heading", { name: "Результаты" })),
+      .getByText("Теперь вы зритель")
+      .or(page.getByRole("heading", { name: "Игра завершена" })),
   ).toBeVisible();
 }
 
@@ -131,7 +143,7 @@ export async function finishGameViaUi(hostPage: Page, allPages: readonly Page[])
     .getByRole("button", { name: "Завершить игру" })
     .click();
   for (const page of allPages) {
-    await expect(page.getByRole("heading", { name: "Результаты" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Игра завершена" })).toBeVisible();
   }
 }
 

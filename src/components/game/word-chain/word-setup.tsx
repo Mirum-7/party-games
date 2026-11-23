@@ -2,24 +2,20 @@
 
 import * as React from "react";
 
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from "@/components/ui/alert-dialog";
+import { Check } from "lucide-react";
+
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Separator } from "@/components/ui/separator";
-import { normalizeWordInput, wordInputError } from "@/components/game/word-chain/helpers";
+import { ConfirmDialog } from "@/components/game/confirm-dialog";
+import { PlayerRow } from "@/components/game/player-row";
+import {
+  MAX_WORD_LENGTH,
+  normalizeWordInput,
+  wordInputError,
+} from "@/components/game/word-chain/helpers";
 import type { GameStateResponse } from "@/shared/contracts/game";
 
 // Узкий контракт для будущей интеграции с хуком GameRoom: сервер повторяет все
@@ -64,14 +60,18 @@ export function WordSetup({ state, mutationPending, onSubmitWord, onCancel }: Wo
   }
 
   const targetName = setup?.target != null && !setup.targetHidden ? setup.target.name : null;
+  const submittedCount = players.filter((player) => player.hasSubmittedWord).length;
+  const lengthHint = `От 1 до ${MAX_WORD_LENGTH} символов. Слово можно изменить до начала игры.`;
 
   return (
     <div className="mx-auto flex w-full max-w-md flex-col gap-4">
-      <header className="flex items-center justify-between gap-2">
+      <header className="flex flex-wrap items-center justify-between gap-2">
         <h1 className="text-xl font-semibold tracking-tight">
-          {targetName != null ? `Загадай слово ${targetName}` : "Введи загаданное слово"}
+          {targetName != null
+            ? `Загадайте слово для игрока: ${targetName}`
+            : "Введите загаданное слово"}
         </h1>
-        {setup?.word != null ? <Badge variant="secondary">Слово сохранено</Badge> : null}
+        <Badge variant="secondary">{`Слова сохранены: ${submittedCount} из ${players.length}`}</Badge>
       </header>
 
       {setup?.targetHidden ? (
@@ -80,9 +80,9 @@ export function WordSetup({ state, mutationPending, onSubmitWord, onCancel }: Wo
         </p>
       ) : null}
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Твоё слово</CardTitle>
+      <Card className="gap-4 py-4">
+        <CardHeader className="gap-0">
+          <CardTitle className="text-base">Ваше слово</CardTitle>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="flex flex-col gap-3" noValidate>
@@ -96,7 +96,7 @@ export function WordSetup({ state, mutationPending, onSubmitWord, onCancel }: Wo
                 onChange={(event) => setWord(event.target.value)}
                 disabled={inputDisabled}
                 aria-invalid={error != null}
-                aria-describedby={error != null ? "word-input-error" : undefined}
+                aria-describedby={`word-input-hint${error != null ? " word-input-error" : ""}`}
                 className="min-h-11"
               />
             </div>
@@ -112,6 +112,9 @@ export function WordSetup({ state, mutationPending, onSubmitWord, onCancel }: Wo
             >
               {mutationPending ? "Сохраняем…" : "Сохранить слово"}
             </Button>
+            <p id="word-input-hint" className="text-sm text-muted-foreground">
+              {lengthHint}
+            </p>
           </form>
         </CardContent>
       </Card>
@@ -123,31 +126,31 @@ export function WordSetup({ state, mutationPending, onSubmitWord, onCancel }: Wo
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <ol className="flex flex-col">
-            {players.map((player, index) => (
-              <li key={player.id}>
-                {index > 0 ? <Separator /> : null}
-                <div className="flex min-h-11 items-center gap-2 py-1.5">
-                  <span className="min-w-0 flex-1 truncate font-medium">
-                    {player.name}
-                    {player.id === viewer.playerId ? " (вы)" : ""}
-                  </span>
-                  {player.isHost ? <Badge variant="secondary">Хост</Badge> : null}
-                  {player.hasSubmittedWord ? (
-                    <Badge variant="default">Слово сохранено</Badge>
+          <ul className="flex flex-col">
+            {players.map((player) => (
+              <PlayerRow
+                key={player.id}
+                player={player}
+                isViewer={player.id === viewer.playerId}
+                status={
+                  player.hasSubmittedWord ? (
+                    <Badge variant="success">
+                      <Check aria-hidden="true" />
+                      Слово готово
+                    </Badge>
                   ) : (
                     <Badge variant="outline">Ждём слово</Badge>
-                  )}
-                </div>
-              </li>
+                  )
+                }
+              />
             ))}
-          </ol>
+          </ul>
         </CardContent>
       </Card>
 
       {capabilities.canCancel ? (
-        <AlertDialog>
-          <AlertDialogTrigger asChild>
+        <ConfirmDialog
+          trigger={
             <Button
               type="button"
               variant="outline"
@@ -156,23 +159,13 @@ export function WordSetup({ state, mutationPending, onSubmitWord, onCancel }: Wo
             >
               Отменить попытку
             </Button>
-          </AlertDialogTrigger>
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle>Отменить попытку?</AlertDialogTitle>
-              <AlertDialogDescription>
-                Назначения и слова будут удалены, комната вернётся в лобби. Участники
-                и настройки сохранятся.
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel className="min-h-11">Назад</AlertDialogCancel>
-              <AlertDialogAction onClick={() => void onCancel()} className="min-h-11">
-                Отменить попытку
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
+          }
+          title="Отменить попытку?"
+          description="Назначения и слова будут удалены, комната вернётся в лобби. Участники и настройки сохранятся."
+          actionLabel="Отменить попытку"
+          actionVariant="destructive"
+          onAction={onCancel}
+        />
       ) : null}
     </div>
   );

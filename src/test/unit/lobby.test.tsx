@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { renderToString } from "react-dom/server";
 
-import { getStartBlockReason, Lobby } from "@/components/game/lobby";
+import { getStartBlockReason, INVITE_COPIED_RESET_MS, Lobby } from "@/components/game/lobby";
 import type { GameStateResponse } from "@/shared/contracts/game";
 
 // Фокусные SSR-тесты разметки лобби и чистых хелперов. Индикатор соединения
@@ -52,6 +52,7 @@ function makeState(players: GameStateResponse["players"]): GameStateResponse {
       canMarkGuessed: false,
       canFinish: false,
       canCancel: false,
+      canRestart: false,
       canLeave: true,
     },
   };
@@ -101,7 +102,7 @@ describe("getStartBlockReason", () => {
 });
 
 describe("Lobby", () => {
-  test("показывает код комнаты, порядок игроков, хоста и готовность", () => {
+  test("показывает код в accent-карточке, порядок игроков, хоста и статусы готовности", () => {
     const html = renderLobby(
       makeState([
         player("Маша", { isHost: true }),
@@ -110,11 +111,20 @@ describe("Lobby", () => {
       ]),
     );
     expect(html).toContain("K7Q2MN");
+    expect(html).toContain("bg-primary");
+    expect(html).toContain("Скопировать приглашение");
+    expect(html).toContain("Присоединяйся к игре Words Game! Код комнаты: K7Q2MN");
+    // Текст приглашения на primary-фоне без ослабления прозрачности: /80
+    // давал бы контраст ниже AA (4.06 против требуемых 4.5).
+    expect(html).not.toContain("primary-foreground/80");
+    expect(html).toContain('class="text-sm text-primary-foreground"');
     expect(html.indexOf("Маша")).toBeLessThan(html.indexOf("Петя"));
     expect(html.indexOf("Петя")).toBeLessThan(html.indexOf("Оля"));
     expect(html).toContain("Хост");
     expect(html).toContain("Готов");
-    expect(html).toContain("Не готов");
+    expect(html).toContain("Пока не готов");
+    expect(html).toContain('data-variant="success"');
+    expect(html).toContain('data-variant="warning"');
   });
 
   test("флаги слова и угадывания показываются только когда есть в DTO", () => {
@@ -139,7 +149,7 @@ describe("Lobby", () => {
     expect(withoutFlags).not.toContain("Угадал");
   });
 
-  test("админ видит переключатель скрытия имён, удаление и старт", () => {
+  test("удаление участника живёт в строке ростера, отдельного списка кнопок нет", () => {
     const html = renderLobby(
       makeState([
         player("Маша", { isHost: true }),
@@ -147,12 +157,20 @@ describe("Lobby", () => {
         player("Оля"),
       ]),
     );
+    for (const name of ["Петя", "Оля"]) {
+      const label = `aria-label="Удалить участника «${name}»"`;
+      expect(html).toContain(label);
+      const actionAt = html.indexOf(label);
+      const item = html.slice(html.lastIndexOf("<li", actionAt), html.indexOf("</li>", actionAt));
+      expect(item).toContain(name);
+    }
+    expect(html).not.toContain('aria-label="Удалить участника «Маша»"');
+    expect(html.slice(html.indexOf("</ol>"))).not.toContain("Удалить участника");
     expect(html).toContain("Скрывать имена адресатов");
-    expect(html).toContain("Удалить Петя");
     expect(html).toContain("Начать игру");
   });
 
-  test("не-админ не видит управляющих контролов", () => {
+  test("не-админ не видит управляющих контролов, но управляет своей готовностью", () => {
     const state = makeState([
       player("Маша", { isHost: true }),
       player("Петя"),
@@ -162,8 +180,9 @@ describe("Lobby", () => {
     state.capabilities = { ...state.capabilities, canEditSettings: false, canManagePlayers: false, canStart: false };
     const html = renderLobby(state);
     expect(html).not.toContain("Скрывать имена адресатов");
-    expect(html).not.toContain("Удалить");
+    expect(html).not.toContain("Удалить участника");
     expect(html).not.toContain("Начать игру");
+    expect(html).toContain('id="ready-button"');
   });
 
   test("старт заблокирован с видимой русской причиной", () => {
@@ -174,16 +193,62 @@ describe("Lobby", () => {
     expect(html).toMatch(/Начать игру/);
   });
 
-  test("переключение готовности доступно только себе", () => {
-    const html = renderLobby(
+  test("готовность — одна полноширинная кнопка вместо переключателя", () => {
+    const notReady = renderLobby(
+      makeState([
+        player("Маша", { isHost: true, isReady: false }),
+        player("Петя"),
+        player("Оля"),
+      ]),
+    );
+    expect(notReady.match(/id="ready-button"/g)?.length).toBe(1);
+    expect(notReady).toContain("Я готов");
+    expect(notReady).not.toContain("ready-switch");
+
+    const ready = renderLobby(
       makeState([
         player("Маша", { isHost: true }),
         player("Петя"),
         player("Оля"),
       ]),
     );
-    expect(html).toContain("Готовность");
-    expect(html).not.toContain("Изменить готовность Петя");
+    expect(ready).toContain("Вы готовы");
+    expect(ready).not.toContain("ready-switch");
+  });
+
+  test("«Ждём начала игры хостом» видит только готовый не-хост", () => {
+    const hostView = renderLobby(
+      makeState([
+        player("Маша", { isHost: true }),
+        player("Петя"),
+        player("Оля"),
+      ]),
+    );
+    expect(hostView).not.toContain("Ждём начала игры хостом");
+
+    const readyGuestState = makeState([
+      player("Маша", { isHost: true }),
+      player("Петя"),
+      player("Оля"),
+    ]);
+    readyGuestState.viewer = { playerId: readyGuestState.players[1].id };
+    const readyGuestView = renderLobby(readyGuestState);
+    expect(readyGuestView).toContain("Ждём начала игры хостом");
+
+    // Неготовый участник ещё действует, а не ждёт: подсказка не показана.
+    const notReadyGuestState = makeState([
+      player("Маша", { isHost: true }),
+      player("Петя", { isReady: false }),
+      player("Оля"),
+    ]);
+    notReadyGuestState.viewer = { playerId: notReadyGuestState.players[1].id };
+    const notReadyGuestView = renderLobby(notReadyGuestState);
+    expect(notReadyGuestView).not.toContain("Ждём начала игры хостом");
+  });
+
+  test("copied feedback сбрасывается таймером 2–3 с с очисткой", () => {
+    expect(INVITE_COPIED_RESET_MS).toBeGreaterThanOrEqual(2000);
+    expect(INVITE_COPIED_RESET_MS).toBeLessThanOrEqual(3000);
   });
 
   test("выход использует доступный диалог подтверждения", () => {
@@ -219,6 +284,7 @@ describe("Lobby", () => {
       ]),
     );
     expect(html).toContain("min-h-11");
+    expect(html).toContain("size-11");
     expect(html).toContain("focus-visible");
   });
 });

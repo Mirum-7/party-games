@@ -53,6 +53,7 @@ test("POST /games: 201, персональный DTO и защищённая coo
     canMarkGuessed: false,
     canFinish: false,
     canCancel: false,
+    canRestart: false,
     canLeave: true,
   });
 
@@ -620,6 +621,83 @@ test("POST /cancel: 403 не-админу, 200 админу возвращает
   await startAssigningWords(lobby);
   const { state: restarted } = await getStateViaApi(lobby.host, lobby.code);
   expect(restarted.game.phase).toBe("ASSIGNING_WORDS");
+});
+
+test("POST /restart: 409 в ACTIVE, 403 не-админу в FINISHED, 200 админу возвращает в LOBBY, повтор — no-op", async () => {
+  const lobby = await createLobbyOfThree();
+  await startPlaying(lobby, ["самолёт", "поезд", "корабль"]);
+
+  // В ACTIVE (PLAYING) админу — 409: раунд не сброшен, ревизия прежняя.
+  const { state: beforeConflict } = await getStateViaApi(lobby.host, lobby.code);
+  const inPlaying = await lobby.host.post(`${API_PREFIX}/${lobby.code}/restart`, {
+    headers: originHeaders,
+  });
+  await expectApiError(inPlaying, 409, "INVALID_GAME_STATE");
+  const { state: afterConflict } = await getStateViaApi(lobby.host, lobby.code);
+  expect(afterConflict.game.revision).toBe(beforeConflict.game.revision);
+  expect(afterConflict.game.phase).toBe("PLAYING");
+  expect(afterConflict.hints).toHaveLength(3);
+
+  // Досрочное завершение → FINISHED.
+  const finished = await lobby.host.post(`${API_PREFIX}/${lobby.code}/finish`, {
+    headers: originHeaders,
+  });
+  expect(finished.status()).toBe(200);
+  const finishedState = (await finished.json()) as GameStateResponse;
+  expect(finishedState.game.phase).toBe("FINISHED");
+  expect(finishedState.capabilities.canRestart).toBe(true);
+
+  // Без cookie — 401; без Origin — 400 ORIGIN_REJECTED.
+  const anonymous = await newScenarioContext();
+  const unauthenticated = await anonymous.post(`${API_PREFIX}/${lobby.code}/restart`, {
+    headers: originHeaders,
+  });
+  await expectApiError(unauthenticated, 401, "UNAUTHENTICATED");
+
+  const noOrigin = await lobby.host.post(`${API_PREFIX}/${lobby.code}/restart`);
+  await expectApiError(noOrigin, 400, "ORIGIN_REJECTED");
+
+  // Не-админ в FINISHED — 403, состояние комнаты неизменно.
+  const forbidden = await lobby.second.post(`${API_PREFIX}/${lobby.code}/restart`, {
+    headers: originHeaders,
+  });
+  await expectApiError(forbidden, 403, "FORBIDDEN");
+  const { state: afterForbidden } = await getStateViaApi(lobby.host, lobby.code);
+  expect(afterForbidden.game.revision).toBe(finishedState.game.revision);
+  expect(afterForbidden.game.phase).toBe("FINISHED");
+
+  // Админ в FINISHED — 200: попытка очищена, состав, код и настройки сохранены.
+  const restarted = await lobby.host.post(`${API_PREFIX}/${lobby.code}/restart`, {
+    headers: originHeaders,
+  });
+  expect(restarted.status()).toBe(200);
+  expectNoStore(restarted);
+  const state = (await restarted.json()) as GameStateResponse;
+  expect(state.game.phase).toBe("LOBBY");
+  expect(state.game.revision).toBe(finishedState.game.revision + 1);
+  expect(state.game.startedAt).toBeNull();
+  expect(state.game.finishedAt).toBeNull();
+  expect(state.setup).toBeNull();
+  expect(state.hints).toBeNull();
+  expect(state.results).toBeNull();
+  expect(state.players.map((player) => player.id)).toEqual([
+    lobby.hostId,
+    lobby.secondId,
+    lobby.thirdId,
+  ]);
+  expect(state.players.every((player) => !player.isReady && !player.hasSubmittedWord && !player.hasGuessed)).toBe(
+    true,
+  );
+  expect(state.capabilities.canRestart).toBe(false);
+  expect(state.capabilities.canLeave).toBe(true);
+
+  // Повторный restart в LOBBY — no-op: 200 без новой ревизии.
+  const repeat = await lobby.host.post(`${API_PREFIX}/${lobby.code}/restart`, {
+    headers: originHeaders,
+  });
+  expect(repeat.status()).toBe(200);
+  expectNoStore(repeat);
+  expect(((await repeat.json()) as GameStateResponse).game.revision).toBe(state.game.revision);
 });
 
 test("DELETE /players/{playerId}: только админ, удалённый теряет доступ (401)", async () => {

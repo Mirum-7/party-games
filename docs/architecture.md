@@ -54,6 +54,7 @@ src/server/
 │   └── word-chain/
 │       ├── rules.ts        # чистые правила и построение цикла
 │       ├── service.ts      # транзакционные команды
+│       ├── attempt.ts      # сброс попытки (resetAttempt)
 │       ├── projection.ts   # персональный DTO
 │       ├── schemas.ts      # Zod-схемы
 │       └── types.ts
@@ -70,6 +71,27 @@ src/server/
 5. UI зависит от контрактов, а не от Prisma-моделей.
 6. Prisma Client и серверные сервисы не импортируются в Client Components.
 7. Чистые правила не зависят от Next.js, HTTP и Prisma и тестируются отдельно.
+
+### Контракт типа игры (`GameDefinition`)
+
+Core знает о конкретной игре только описание `GameDefinition`:
+
+```ts
+type GameDefinition = {
+  readonly type: "WORD_CHAIN";
+  readonly minPlayers: 3;
+  readonly maxPlayers: 12;
+  createGame(tx, gameId): Promise<void>;
+  updateSettings(tx, gameId, input): Promise<boolean>;
+  resetAttempt(tx, gameId): Promise<void>;
+  project(tx, input): Promise<GameProjectedState>;
+};
+```
+
+- Hook `resetAttempt` инкапсулирует полный сброс попытки: удаление назначений и результатов, сброс готовности, возврат в `LOBBY` и очистку игровых временных меток. Его используют отмена ввода слов, перезапуск завершённого раунда и выход из `FINISHED`. Схема Prisma и миграции при этом не меняются.
+- Постусловие hook: после его завершения в комнате не остаётся записей попытки, ссылающихся на игроков. Core выполняет после hook независимую проверку `assertNoGameRecords` и превращает остатки в доменную 409 вместо Prisma/500; игровой модуль обязан проверять собственные дополнительные записи до возврата из hook.
+- Core `leaveGame` вызывает `resetAttempt` только перед выходом из `FINISHED`, затем тот же `assertNoGameRecords` как post-condition и только после этого передаёт роль или удаляет игрока.
+- Разрешение `GameType → GameDefinition` получает Core через resolver, переданный из composition root: HTTP leave route передаёт resolver из `games/registry.ts`, а команда разрешает `game.type` внутри себя уже после блокировки строки `Game`, без дополнительного запроса по коду. Проверки фазы и прав выполняются там же, под блокировкой.
 
 Не создаются динамические плагины, универсальный язык игровых действий или общая JSON-модель всех будущих игр.
 

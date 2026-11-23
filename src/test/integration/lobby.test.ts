@@ -694,6 +694,7 @@ describe("leaveGame", () => {
       code: created.code,
       playerId: petya.value.playerId,
       realtime,
+      resolveDefinition: getGameDefinition,
     });
 
     expect(result.changed).toBe(true);
@@ -722,12 +723,12 @@ describe("leaveGame", () => {
       realtime: createSpyRealtime().realtime,
     });
 
-    await leaveGame({ code: created.code, playerId: created.playerId, realtime: createSpyRealtime().realtime });
+    await leaveGame({ code: created.code, playerId: created.playerId, realtime: createSpyRealtime().realtime, resolveDefinition: getGameDefinition });
     let game = await loadGame(created.gameId);
     expect(game.hostPlayerId).toBe(petya.value.playerId);
     expect(game.players).toHaveLength(2);
 
-    await leaveGame({ code: created.code, playerId: petya.value.playerId, realtime: createSpyRealtime().realtime });
+    await leaveGame({ code: created.code, playerId: petya.value.playerId, realtime: createSpyRealtime().realtime, resolveDefinition: getGameDefinition });
     game = await loadGame(created.gameId);
     expect(game.hostPlayerId).toBe(vanya.value.playerId);
     expect(game.players).toHaveLength(1);
@@ -737,7 +738,7 @@ describe("leaveGame", () => {
     const created = await createGame({ definition, name: "Маша" });
     const { realtime, published } = createSpyRealtime();
 
-    const result = await leaveGame({ code: created.code, playerId: created.playerId, realtime });
+    const result = await leaveGame({ code: created.code, playerId: created.playerId, realtime, resolveDefinition: getGameDefinition });
 
     expect(result.changed).toBe(true);
     expect(result.value.roomDeleted).toBe(true);
@@ -756,6 +757,7 @@ describe("leaveGame", () => {
           code: created.code,
           playerId: created.playerId,
           realtime: createSpyRealtime().realtime,
+          resolveDefinition: getGameDefinition,
         }),
       ),
       "INVALID_GAME_STATE",
@@ -772,6 +774,7 @@ describe("leaveGame", () => {
           code: created.code,
           playerId: randomUUID(),
           realtime: createSpyRealtime().realtime,
+          resolveDefinition: getGameDefinition,
         }),
       ),
       "FORBIDDEN",

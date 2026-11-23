@@ -1,6 +1,7 @@
 import { destroyGuestSession } from "@/server/core/auth/session";
 import { leaveGame } from "@/server/core/players/service";
 import { getProcessGameRealtime } from "@/server/core/realtime/in-memory";
+import { getGameDefinition } from "@/server/games/registry";
 import {
   applySessionHeaders,
   createSessionRouteContext,
@@ -24,7 +25,7 @@ export async function POST(request: Request, context: RouteContext): Promise<Res
 
     const session = createSessionRouteContext(request);
     const playerId = await requireCallerPlayerId(session.jar);
-    await leaveGame({ code, playerId, realtime: getProcessGameRealtime() });
+    await leaveGame({ code, playerId, realtime: getProcessGameRealtime(), resolveDefinition: getGameDefinition });
 
     // Сессия уничтожается только после успешного выхода.
     await destroyGuestSession(session.jar);

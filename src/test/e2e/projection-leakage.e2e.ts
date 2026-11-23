@@ -1,6 +1,6 @@
 import { expect, test, type Browser, type Page } from "@playwright/test";
 
-import { API_PREFIX, newScenarioContext } from "./helpers";
+import { API_PREFIX, newBrowserContext, newScenarioContext } from "./helpers";
 import {
   CANARY_WORDS,
   captureViewerSurfaces,
@@ -26,10 +26,10 @@ async function openFourContexts(browser: Browser): Promise<{
   close: () => Promise<void>;
 }> {
   const contexts = [
-    await browser.newContext(),
-    await browser.newContext(),
-    await browser.newContext(),
-    await browser.newContext(),
+    await newBrowserContext(browser),
+    await newBrowserContext(browser),
+    await newBrowserContext(browser),
+    await newBrowserContext(browser),
   ];
   const players: Player[] = [];
   for (let index = 0; index < contexts.length; index += 1) {
@@ -51,11 +51,8 @@ function byName(players: Player[], name: ViewerName): Player {
 
 async function createRoomViaUi(masha: Page): Promise<string> {
   await masha.goto("/");
-  const createSection = masha.locator("section", {
-    has: masha.getByRole("heading", { name: "Создать игру" }),
-  });
-  await createSection.getByLabel("Ваше имя").fill("Маша");
-  await createSection.getByRole("button", { name: "Создать игру" }).click();
+  await masha.locator("#player-name").fill("Маша");
+  await masha.getByRole("button", { name: "Создать комнату" }).click();
   await expect(masha.getByRole("heading", { name: "Лобби" })).toBeVisible();
   const code = new URL(masha.url()).pathname.split("/").at(-1) ?? "";
   expect(code).toMatch(/^[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{6}$/u);
@@ -73,16 +70,19 @@ async function joinViaUi(page: Page, code: string, name: ViewerName): Promise<vo
 async function submitWordViaUi(page: Page, word: string, completesSetup = false): Promise<void> {
   await page.locator("#word-input").fill(word);
   await page.getByRole("button", { name: "Сохранить слово" }).click();
-  const savedBadge = page.locator("header").getByText("Слово сохранено", { exact: true });
-  // Последнее слово атомарно переводит игру в PLAYING: бейджа у последнего
-  // автора нет, ожидаем переход экрана.
+  // Прогресс «Слова сохранены» в шапке. Последнее слово атомарно переводит игру
+  // в PLAYING: прогресса у последнего автора нет, ожидаем переход экрана.
+  const progressBadge = page
+    .locator("header")
+    .getByText(/Слова сохранены: [1-9]\d* из 4/u);
   await expect(
-    completesSetup ? savedBadge.or(page.getByRole("heading", { name: "Игра идёт" })) : savedBadge,
+    completesSetup ? progressBadge.or(page.getByRole("heading", { name: "Игра идёт" })) : progressBadge,
   ).toBeVisible();
   if (completesSetup) {
     await expect(page.getByRole("heading", { name: "Игра идёт" })).toBeVisible();
   } else {
-    await expect(savedBadge).toBeVisible();
+    await expect(progressBadge).toBeVisible();
+    await expect(page.locator("#word-input")).toHaveValue(word);
   }
 }
 
@@ -94,8 +94,8 @@ async function markGuessedViaUi(page: Page): Promise<void> {
     .click();
   await expect(
     page
-      .getByText("Вы уже угадали своё слово")
-      .or(page.getByRole("heading", { name: "Результаты" })),
+      .getByText("Теперь вы зритель")
+      .or(page.getByRole("heading", { name: "Игра завершена" })),
   ).toBeVisible();
 }
 
@@ -158,11 +158,13 @@ test("канарейки слов: LOBBY → ASSIGNING_WORDS → PLAYING → FIN
 
     // 2. Все готовы, админ запускает: ASSIGNING_WORDS.
     for (const player of players) {
-      await player.page.locator("#ready-switch").click();
+      await player.page.locator("#ready-button").click();
     }
     await masha.page.getByRole("button", { name: "Начать игру" }).click();
     for (const player of players) {
-      await expect(player.page.getByRole("heading", { name: /Загадай слово/u })).toBeVisible();
+      await expect(
+        player.page.getByRole("heading", { name: /^Загадайте слово для игрока: /u }),
+      ).toBeVisible();
     }
 
     // 3. Первые трое вводят канарейки; последнее слово перевело бы игру в
@@ -220,7 +222,7 @@ test("канарейки слов: LOBBY → ASSIGNING_WORDS → PLAYING → FIN
       await markGuessedViaUi(byName(players, name).page);
     }
     for (const player of players) {
-      await expect(player.page.getByRole("heading", { name: "Результаты" })).toBeVisible();
+      await expect(player.page.getByRole("heading", { name: "Игра завершена" })).toBeVisible();
     }
 
     const finishedSurfaces = await captureAll(players, code);

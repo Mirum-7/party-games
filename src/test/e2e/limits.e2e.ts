@@ -175,7 +175,7 @@ test("двойная отправка и повтор угадывания по�
     const apiReplay = await peteApi.post(`${API_PREFIX}/${code}/guessed`, { headers: originHeaders });
     expect(apiReplay.status(), "API-повтор принят идемпотентно").toBe(200);
 
-    await expect(petePage.getByText("Вы уже угадали своё слово")).toBeVisible();
+    await expect(petePage.getByText("Теперь вы зритель")).toBeVisible();
     const afterDouble = await getStateViaApi(peteApi, code);
     // Принято ровно одно событие: ревизия выросла на единицу независимо от
     // порядка двух запросов.
@@ -189,7 +189,7 @@ test("двойная отправка и повтор угадывания по�
     await guessViaUi(sashaPage);
     await guessViaUi(mashaPage);
     for (const page of pages) {
-      await expect(page.getByRole("heading", { name: "Результаты" })).toBeVisible();
+      await expect(page.getByRole("heading", { name: "Игра завершена" })).toBeVisible();
     }
 
     const finishedA = await getStateViaApi(peteApi, code);

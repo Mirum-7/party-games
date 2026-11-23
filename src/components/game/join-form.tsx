@@ -20,8 +20,9 @@ export type JoinFormProps = {
   initialCode?: string;
 };
 
-// Переиспользуемая форма входа по коду приглашения: на домашней странице и
-// позже на серверной странице комнаты. Новое устройство всегда вводит имя.
+// Форма входа по коду приглашения на серверной странице комнаты (/game/{code});
+// домашняя страница использует HomeForms с одним общим полем имени. Новое
+// устройство всегда вводит имя.
 export function JoinForm({ onJoin, pending = false, initialCode = "" }: JoinFormProps) {
   const [name, setName] = React.useState("");
   const [code, setCode] = React.useState(initialCode);

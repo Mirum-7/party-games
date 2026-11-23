@@ -28,6 +28,7 @@ import {
 import { isValidWord, MAX_WORD_LENGTH } from "./validation";
 import type { WordChainPhase } from "./types";
 
+import { resetWordChainAttempt } from "./attempt";
 import { createWordChainGame, updateWordChainSettings } from "./settings";
 import { projectWordChainState } from "./projection";
 
@@ -39,6 +40,7 @@ export const wordChainGameDefinition: GameDefinition = {
   maxPlayers: 12,
   createGame: createWordChainGame,
   updateSettings: updateWordChainSettings,
+  resetAttempt: resetWordChainAttempt,
   project: projectWordChainState,
 };
 
@@ -202,21 +204,39 @@ export async function cancelWordChain(input: {
         throw new GameCommandError("INVALID_GAME_STATE", 409, INVALID_PHASE_MESSAGE);
       }
 
-      await tx.wordAssignment.deleteMany({ where: { gameId: game.id } });
-      await tx.gameResult.deleteMany({ where: { gameId: game.id } });
-      await tx.player.updateMany({
-        where: { gameId: game.id },
-        data: { isReady: false },
-      });
-      await tx.game.update({
-        where: { id: game.id },
-        data: { status: "LOBBY", startedAt: null, finishedAt: null },
-      });
-      await tx.wordChainGame.update({
-        where: { gameId: game.id },
-        data: { phase: null, playingStartedAt: null },
-      });
+      await resetWordChainAttempt(tx, game.id);
       return { changed: true, value: { cancelled: true } };
+    },
+  });
+}
+
+export type RestartedWordChain = { restarted: boolean };
+
+// Рестарт завершённой попытки админом: общий сброс данных попытки
+// (resetWordChainAttempt), настройки и состав комнаты сохраняются. В LOBBY —
+// no-op без ревизии и публикации; в ACTIVE команде нет (есть отмена попытки).
+export async function restartWordChain(input: {
+  code: string;
+  playerId: string;
+  realtime: GameRealtime;
+}): Promise<CommandResult<{ restarted: boolean }>> {
+  const code = normalizeCodeOrThrow(input.code);
+
+  return runGameCommand<RestartedWordChain>({
+    code,
+    realtime: input.realtime,
+    action: "restart",
+    command: async (tx, game) => {
+      await requireMember(tx, game.id, input.playerId);
+      requireHost(game, input.playerId);
+      if (game.status === "LOBBY") {
+        return { changed: false, value: { restarted: false } };
+      }
+      if (game.status !== "FINISHED") {
+        throw new GameCommandError("INVALID_GAME_STATE", 409, INVALID_PHASE_MESSAGE);
+      }
+      await resetWordChainAttempt(tx, game.id);
+      return { changed: true, value: { restarted: true } };
     },
   });
 }

@@ -3,17 +3,18 @@ import { expect, test, type Locator, type Page } from "@playwright/test";
 import {
   API_PREFIX,
   joinGameViaApi,
+  newBrowserContext,
   newScenarioContext,
   originHeaders,
 } from "./helpers";
 
 // Мобильный приёмочный прогон на viewport 360px (оба движка — проекты
 // chromium и webkit конфигурации): ни в одной фазе нет горизонтального
-// переполнения; интерактивные цели измерены (bounding box >= 44x44, свитчи —
-// через их подпись как реализованную интерактивную область); формы и диалоги
-// работают с клавиатуры, фокус виден, активный контрол остаётся доступным
-// при сжатом вьюпорте (эмуляция открытой клавиатуры); финал — карточки без
-// таблиц и горизонтального скролла.
+// переполнения; интерактивные цели измерены (bounding box >= 44x44); формы и
+// диалоги работают с клавиатуры, фокус виден, активный контрол остаётся
+// доступным при сжатом вьюпорте (эмуляция открытой клавиатуры); удаление
+// участника — цель в его строке; финал — карточки без таблиц, с целями
+// повторного раунда и выхода в главное меню.
 
 const VIEWPORT_WIDTH = 360;
 const VIEWPORT_HEIGHT = 740;
@@ -102,11 +103,8 @@ async function expectWithinViewport(
 
 async function createGameViaUi(page: Page, name: string): Promise<string> {
   await page.goto("/");
-  const createSection = page.locator("section", {
-    has: page.getByRole("heading", { name: "Создать игру" }),
-  });
-  await createSection.getByLabel("Ваше имя").fill(name);
-  await createSection.getByRole("button", { name: "Создать игру" }).click();
+  await page.locator("#player-name").fill(name);
+  await page.getByRole("button", { name: "Создать комнату" }).click();
   await expect(page.getByRole("heading", { name: "Лобби" })).toBeVisible();
   const code = new URL(page.url()).pathname.split("/").at(-1) ?? "";
   expect(code).toMatch(/^[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{6}$/u);
@@ -118,7 +116,7 @@ test("360px: домашняя форма, лобби и ввод слова — 
 }) => {
   test.setTimeout(120_000);
   const consoleErrors: string[] = [];
-  const context = await browser.newContext({
+  const context = await newBrowserContext(browser, {
     viewport: { width: VIEWPORT_WIDTH, height: VIEWPORT_HEIGHT },
   });
   const page = await context.newPage();
@@ -130,37 +128,43 @@ test("360px: домашняя форма, лобби и ввод слова — 
     // --- Домашняя страница ---
     await page.goto("/");
     await expectNoHorizontalOverflow(page);
+    // Одно общее поле имени над обеими операциями: создание и подключение
+    // используют его значение.
+    const nameInput = page.locator("#player-name");
+    await expectMeasuredTarget(nameInput, "дом: общее имя");
     const createSection = page.locator("section", {
-      has: page.getByRole("heading", { name: "Создать игру" }),
+      has: page.getByRole("heading", { name: "Создать комнату" }),
     });
-    await expectMeasuredTarget(createSection.getByLabel("Ваше имя"), "дом: имя");
     await expectMeasuredTarget(
-      createSection.getByRole("button", { name: "Создать игру" }),
+      createSection.getByRole("button", { name: "Создать комнату" }),
       "дом: создание",
     );
     const joinSection = page.locator("section", {
       has: page.getByRole("heading", { name: "Подключиться по коду" }),
     });
-    await expectMeasuredTarget(joinSection.getByLabel("Ваше имя"), "дом: имя входа");
     await expectMeasuredTarget(joinSection.getByLabel("Код приглашения"), "дом: код входа");
     await expectMeasuredTarget(
       joinSection.getByRole("button", { name: "Подключиться" }),
       "дом: вход",
     );
 
-    // Клавиатурное создание игры: ввод, Enter отправляет форму. В Chromium
-    // дополнительно проверяем Tab-обход до кнопки: WebKit/Safari по умолчанию
+    // Клавиатурное создание игры: ввод в общее поле, видимый фокус. Общее поле
+    // находится вне обеих форм, поэтому Enter в нём форму не отправляет:
+    // активация — Enter на сфокусированной кнопке создания. В Chromium
+    // дополнительно проверяем Tab-обход до кнопки; WebKit/Safari по умолчанию
     // не включает кнопки в Tab-порядок (настройка платформы, не приложения).
-    await createSection.getByLabel("Ваше имя").click();
+    await nameInput.click();
     await page.keyboard.type("Маша");
-    await expectFocusRing(createSection.getByLabel("Ваше имя"), "дом: имя");
-    const createButton = createSection.getByRole("button", { name: "Создать игру" });
+    await expectFocusRing(nameInput, "дом: общее имя");
+    const createButton = createSection.getByRole("button", { name: "Создать комнату" });
     if (project === "chromium") {
       await page.keyboard.press("Tab");
       await expect(createButton).toBeFocused();
       await expectFocusRing(createButton, "дом: кнопка создания");
+      await page.keyboard.press("Enter");
+    } else {
+      await createButton.click();
     }
-    await page.keyboard.press("Enter");
     await expect(page.getByRole("heading", { name: "Лобби" })).toBeVisible();
     const code = new URL(page.url()).pathname.split("/").at(-1) ?? "";
     expect(code).toMatch(/^[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{6}$/u);
@@ -175,9 +179,18 @@ test("360px: домашняя форма, лобби и ввод слова — 
 
     const inviteButton = page.getByRole("button", { name: "Скопировать приглашение" });
     await expectMeasuredTarget(inviteButton, "лобби: приглашение");
-    // Свитч готовности: реализованная интерактивная область — его подпись.
-    const readyLabel = page.getByText("Готовность: Маша");
-    await expectMeasuredTarget(readyLabel, "лобби: подпись готовности");
+    // Полноразмерная кнопка собственной готовности.
+    const readyButton = page.locator("#ready-button");
+    await expectMeasuredTarget(readyButton, "лобби: готовность");
+    // Удаление участника — цель в его строке: icon-кнопка с доступным именем.
+    const kickTarget = page.getByRole("button", { name: "Удалить участника «Петя»" });
+    await expectMeasuredTarget(kickTarget, "лобби: удаление участника");
+    await expect(
+      page
+        .getByRole("listitem")
+        .filter({ has: page.getByRole("button", { name: "Удалить участника «Петя»" }) }),
+      "кнопка удаления находится в строке Пети",
+    ).toContainText("Петя");
     await expectMeasuredTarget(
       page.getByText("Скрывать имена адресатов до старта"),
       "лобби: подпись настройки",
@@ -193,8 +206,10 @@ test("360px: домашняя форма, лобби и ввод слова — 
       await expectFocusRing(inviteButton, "лобби: фокус на приглашении");
     }
 
-    // Подпись реально переключает свитч (функциональное доказательство цели).
-    await readyLabel.click();
+    // Кнопка реально переключает готовность: текст меняется на «Вы готовы»,
+    // в строке появляется бейдж «Готов».
+    await readyButton.click();
+    await expect(page.locator("#ready-button")).toHaveText("Вы готовы");
     await expect(
       page.getByRole("listitem").filter({ hasText: "Маша" }).getByText("Готов", { exact: true }),
     ).toBeVisible();
@@ -224,7 +239,7 @@ test("360px: домашняя форма, лобби и ввод слова — 
     await expectMeasuredTarget(startButton, "лобби: старт");
     await startButton.click();
     await expect(
-      page.getByRole("heading", { name: /Загадай слово|Введи загаданное слово/u }),
+      page.getByRole("heading", { name: /^(?:Загадайте слово для игрока: .+|Введите загаданное слово)$/u }),
     ).toBeVisible();
     await expectNoHorizontalOverflow(page);
 
@@ -249,7 +264,7 @@ test("360px: домашняя форма, лобби и ввод слова — 
     }
     await page.keyboard.press("Enter");
     await expect(
-      page.locator("header").getByText("Слово сохранено", { exact: true }),
+      page.locator("header").getByText("Слова сохранены: 1 из 3", { exact: true }),
     ).toBeVisible();
     await expect(wordInput).toHaveValue("телескоп");
     await expectNoHorizontalOverflow(page);
@@ -270,7 +285,7 @@ test("360px: игра, диалоги и финал — клавиатура в 
 }) => {
   test.setTimeout(120_000);
   const consoleErrors: string[] = [];
-  const context = await browser.newContext({
+  const context = await newBrowserContext(browser, {
     viewport: { width: VIEWPORT_WIDTH, height: VIEWPORT_HEIGHT },
   });
   const page = await context.newPage();
@@ -284,7 +299,7 @@ test("360px: игра, диалоги и финал — клавиатура в 
     const vanya = await newScenarioContext();
     await joinGameViaApi(petya, code, "Петя");
     await joinGameViaApi(vanya, code, "Ваня");
-    await page.locator("#ready-switch").click();
+    await page.locator("#ready-button").click();
     await petya.post(`${API_PREFIX}/${code}/readiness`, {
       data: { ready: true },
       headers: originHeaders,
@@ -295,13 +310,13 @@ test("360px: игра, диалоги и финал — клавиатура в 
     });
     await page.getByRole("button", { name: "Начать игру" }).click();
     await expect(
-      page.getByRole("heading", { name: /Загадай слово|Введи загаданное слово/u }),
+      page.getByRole("heading", { name: /^(?:Загадайте слово для игрока: .+|Введите загаданное слово)$/u }),
     ).toBeVisible();
 
     await page.locator("#word-input").fill("пирамида");
     await page.getByRole("button", { name: "Сохранить слово" }).click();
     await expect(
-      page.locator("header").getByText("Слово сохранено", { exact: true }),
+      page.locator("header").getByText("Слова сохранены: 1 из 3", { exact: true }),
     ).toBeVisible();
     await petya.put(`${API_PREFIX}/${code}/word`, {
       data: { word: "ракета" },
@@ -357,13 +372,19 @@ test("360px: игра, диалоги и финал — клавиатура в 
       await expect(dialogAction).toBeFocused();
     }
     await dialogAction.press("Enter");
-    await expect(page.getByText("Вы уже угадали своё слово")).toBeVisible();
+    await expect(page.getByText("Теперь вы зритель")).toBeVisible();
     await expectNoHorizontalOverflow(page);
 
-    // --- FINISHED: карточки, без таблицы и горизонтального скролла ---
+    // --- FINISHED: карточки, финальные цели, без таблицы и горизонтального скролла ---
     await petya.post(`${API_PREFIX}/${code}/guessed`, { headers: originHeaders });
     await vanya.post(`${API_PREFIX}/${code}/guessed`, { headers: originHeaders });
-    await expect(page.getByRole("heading", { name: "Результаты" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Игра завершена" })).toBeVisible();
+    await expect(page.getByText("Победитель")).toBeVisible();
+    // Хост видит обе финальные цели: повторный раунд и выход в главное меню.
+    const restartTarget = page.getByRole("button", { name: "Сыграть ещё с этим составом" });
+    const mainMenuTarget = page.getByRole("button", { name: "В главное меню" });
+    await expectMeasuredTarget(restartTarget, "финал: повторный раунд");
+    await expectMeasuredTarget(mainMenuTarget, "финал: главное меню");
     await expectNoHorizontalOverflow(page);
 
     await expect(page.locator("table")).toHaveCount(0);

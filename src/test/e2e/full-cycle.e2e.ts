@@ -1,7 +1,7 @@
 import { expect, test, type Browser, type Page } from "@playwright/test";
 
 import type { GameStateResponse } from "../../shared/contracts/game";
-import { API_PREFIX } from "./helpers";
+import { API_PREFIX, newBrowserContext } from "./helpers";
 
 // Полный live-цикл WORD_CHAIN: ровно четыре независимых браузерных контекста
 // (Маша/Петя/Ваня/Саша). Создание → три входа → готовность → старт → слова →
@@ -38,10 +38,10 @@ async function openFourContexts(browser: Browser): Promise<{
 }> {
   const consoleErrors: string[] = [];
   const contexts = [
-    await browser.newContext(),
-    await browser.newContext(),
-    await browser.newContext({ viewport: { width: 360, height: 740 } }),
-    await browser.newContext(),
+    await newBrowserContext(browser),
+    await newBrowserContext(browser),
+    await newBrowserContext(browser, { viewport: { width: 360, height: 740 } }),
+    await newBrowserContext(browser),
   ];
   const players: Player[] = [];
   for (let index = 0; index < contexts.length; index += 1) {
@@ -74,11 +74,11 @@ async function guessOwnWord(page: Page): Promise<void> {
     .getByRole("alertdialog")
     .getByRole("button", { name: "Я угадал" })
     .click();
-  // Обычно следует экран зрителя; последнее угадывание сразу завершает игру.
+  // Обычно следует зрительская карточка; последнее угадывание сразу завершает игру.
   await expect(
     page
-      .getByText("Вы уже угадали своё слово")
-      .or(page.getByRole("heading", { name: "Результаты" })),
+      .getByText("Теперь вы зритель")
+      .or(page.getByRole("heading", { name: "Игра завершена" })),
   ).toBeVisible();
 }
 
@@ -89,13 +89,10 @@ test("полный цикл WORD_CHAIN: четыре контекста от л�
   const sasha = byName(players, "Саша");
 
   try {
-    // 1. Маша создаёт комнату.
+    // 1. Маша создаёт комнату (общее поле имени на главной).
     await masha.page.goto("/");
-    const createSection = masha.page.locator("section", {
-      has: masha.page.getByRole("heading", { name: "Создать игру" }),
-    });
-    await createSection.getByLabel("Ваше имя").fill("Маша");
-    await createSection.getByRole("button", { name: "Создать игру" }).click();
+    await masha.page.locator("#player-name").fill("Маша");
+    await masha.page.getByRole("button", { name: "Создать комнату" }).click();
     await expect(masha.page.getByRole("heading", { name: "Лобби" })).toBeVisible();
     const code = new URL(masha.page.url()).pathname.split("/").at(-1) ?? "";
     expect(code).toMatch(/^[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{6}$/u);
@@ -111,9 +108,9 @@ test("полный цикл WORD_CHAIN: четыре контекста от л�
     }
     await expect(masha.page.getByText("Участники (4/12)")).toBeVisible();
 
-    // 3. Все отмечают готовность; готовность синхронизируется через SSE.
+    // 3. Все отмечают готовность кнопкой; готовность синхронизируется через SSE.
     for (const player of players) {
-      await player.page.locator("#ready-switch").click();
+      await player.page.locator("#ready-button").click();
     }
     for (const player of players) {
       await expect(
@@ -135,7 +132,7 @@ test("полный цикл WORD_CHAIN: четыре контекста от л�
       // видимый заголовок с авторизованным setup DTO зрителя: одноразовый
       // fetch /state должен идти после перехода фазы, а не в гонке со стартом.
       await expect(
-        player.page.getByRole("heading", { name: /Загадай слово/u }),
+        player.page.getByRole("heading", { name: /^Загадайте слово для игрока: /u }),
       ).toBeVisible();
       const stateResponse = await player.page.request.get(`${API_PREFIX}/${code}/state`);
       expect(stateResponse.status(), `/state для ${player.name}`).toBe(200);
@@ -146,7 +143,10 @@ test("полный цикл WORD_CHAIN: четыре контекста от л�
       const targetName = viewerState.setup?.target?.name;
       expect(targetName, `адресат присутствует в setup DTO (${player.name})`).toBeTruthy();
       await expect(
-        player.page.getByRole("heading", { name: `Загадай слово ${targetName}`, exact: true }),
+        player.page.getByRole("heading", {
+          name: `Загадайте слово для игрока: ${targetName}`,
+          exact: true,
+        }),
         `заголовок называет адресата из setup DTO (${player.name})`,
       ).toBeVisible();
     }
@@ -155,10 +155,10 @@ test("полный цикл WORD_CHAIN: четыре контекста от л�
     await masha.page.getByRole("button", { name: "Отменить попытку" }).click();
     await masha.page
       .getByRole("alertdialog")
-      .getByRole("button", { name: "Назад" })
+      .getByRole("button", { name: "Отмена" })
       .click();
     await expect(
-      masha.page.getByRole("heading", { name: /Загадай слово/u }),
+      masha.page.getByRole("heading", { name: /^Загадайте слово для игрока: /u }),
     ).toBeVisible();
 
     // 5. Каждый вводит уникальное слово; Ваня — с лишними пробелами: после
@@ -175,30 +175,31 @@ test("полный цикл WORD_CHAIN: четыре контекста от л�
       await player.page.getByRole("button", { name: "Сохранить слово" }).click();
       const savedBadge = player.page
         .locator("header")
-        .getByText("Слово сохранено", { exact: true });
+        .getByText(`Слова сохранены: ${index + 1} из 4`, { exact: true });
       await expect(
         savedBadge.or(player.page.getByRole("heading", { name: "Игра идёт" })),
       ).toBeVisible();
       await expect(savedBadge).toBeVisible();
       await expect(player.page.locator("#word-input")).toHaveValue(WORDS[player.name]);
-      // Факт готовности слова виден остальным без перезагрузки.
+      // Факт готовности слова виден остальным без перезагрузки: бейдж
+      // «Слово готово» в строке автора.
       const other = players[index + 1];
       await expect(
         other.page
           .getByRole("listitem")
           .filter({ hasText: player.name })
-          .getByText("Слово сохранено", { exact: true }),
+          .getByText("Слово готово", { exact: true }),
       ).toBeVisible();
     }
 
     // Перезагрузка в фазе слов сохраняет и личность, и нормализованное слово.
     await vanya.page.reload();
     await expect(
-      vanya.page.getByRole("heading", { name: /Загадай слово/u }),
+      vanya.page.getByRole("heading", { name: /^Загадайте слово для игрока: /u }),
     ).toBeVisible();
     await expect(vanya.page.locator("#word-input")).toHaveValue(WORDS.Ваня);
     await expect(
-      vanya.page.locator("header").getByText("Слово сохранено", { exact: true }),
+      vanya.page.locator("header").getByText("Слова сохранены: 3 из 4", { exact: true }),
     ).toBeVisible();
 
     // Последнее слово атомарно переводит всех в PLAYING.
@@ -214,7 +215,7 @@ test("полный цикл WORD_CHAIN: четыре контекста от л�
       const page = player.page;
       const ownHint = page.locator("li").filter({ hasText: "вам" });
       await expect(ownHint).toHaveCount(1);
-      await expect(ownHint).toContainText("слово скрыто");
+      await expect(ownHint).toContainText("Ваше слово скрыто");
       const hintText = (await ownHint.innerText()).replace("вам", "");
       const author = NAMES.find((name) => name !== player.name && hintText.includes(name));
       expect(author, `автор назначения для ${player.name}`).toBeDefined();
@@ -236,7 +237,7 @@ test("полный цикл WORD_CHAIN: четыре контекста от л�
 
     // Последнее угадывание завершает игру у всех.
     for (const player of players) {
-      await expect(player.page.getByRole("heading", { name: "Результаты" })).toBeVisible();
+      await expect(player.page.getByRole("heading", { name: "Игра завершена" })).toBeVisible();
     }
     await expectNoHorizontalOverflow(vanya.page, 360);
 
@@ -254,7 +255,8 @@ test("полный цикл WORD_CHAIN: четыре контекста от л�
         const [place, name, score] = expected[index];
         await expect(rows.nth(index)).toContainText(`${place} место`);
         await expect(rows.nth(index)).toContainText(name);
-        await expect(rows.nth(index)).toContainText(`Очки: ${score}`);
+        // Очки — строго по aria-label метки строки, а не видимому тексту.
+        await expect(rows.nth(index).locator(`[aria-label="Очки: ${score}"]`)).toBeVisible();
       }
       // После финала все слова раскрыты.
       await expect(player.page.getByRole("heading", { name: "Все слова" })).toBeVisible();
@@ -265,7 +267,7 @@ test("полный цикл WORD_CHAIN: четыре контекста от л�
 
     // Перезагрузка после финала сохраняет личность и результаты.
     await masha.page.reload();
-    await expect(masha.page.getByRole("heading", { name: "Результаты" })).toBeVisible();
+    await expect(masha.page.getByRole("heading", { name: "Игра завершена" })).toBeVisible();
     await expect(masha.page.locator("ol > li").first()).toContainText("1 место");
 
     expect(consoleErrors).toEqual([]);
