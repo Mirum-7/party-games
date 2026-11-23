@@ -63,11 +63,14 @@ export function expectCanary(surfaces: ViewerSurfaces, canary: string, present: 
   expect(surfaces.rscText.includes(canary), `RSC: ${label} ${canary}`).toBe(present);
 }
 
-// Персональные ответы не кешируются; HTML и RSC — подлинные полезные нагрузки
-// страницы комнаты (inline flight-данные и text/x-component соответственно),
-// а не редиректы/страницы ошибок.
+// Все три поверхности зрителя — успешные (200) незакешированные ответы;
+// HTML и RSC — подлинные полезные нагрузки страницы комнаты (inline
+// flight-данные и text/x-component соответственно), а не редиректы/страницы
+// ошибок.
 export function expectSurfaceIntegrity(surfaces: ViewerSurfaces): void {
   expect(surfaces.state.status(), "/state зрителя").toBe(200);
+  expect(surfaces.html.status(), "HTML поверхность зрителя").toBe(200);
+  expect(surfaces.rsc.status(), "RSC поверхность зрителя").toBe(200);
   expect(surfaces.state.headers()["cache-control"], "/state no-store").toContain("no-store");
   expect(surfaces.html.headers()["cache-control"], "HTML no-store").toContain("no-store");
   expect(surfaces.rsc.headers()["cache-control"], "RSC no-store").toContain("no-store");

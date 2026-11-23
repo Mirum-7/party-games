@@ -646,6 +646,36 @@ describe("removePlayer", () => {
       404,
     );
   });
+
+  test("malformed UUID удаляемого — PLAYER_NOT_FOUND без ревизии, изменений и публикации", async () => {
+    const created = await createGame({ definition, name: "Маша" });
+    await joinGame({
+      definition,
+      code: created.code,
+      name: "Петя",
+      playerId: null,
+      realtime: createSpyRealtime().realtime,
+    });
+    const { realtime, published } = createSpyRealtime();
+
+    await expectGameError(
+      Promise.resolve(
+        removePlayer({
+          code: created.code,
+          actorPlayerId: created.playerId,
+          targetPlayerId: "not-a-uuid",
+          realtime,
+        }),
+      ),
+      "PLAYER_NOT_FOUND",
+      404,
+    );
+
+    const game = await loadGame(created.gameId);
+    expect(game.players).toHaveLength(2);
+    expect(game.revision).toBe(1);
+    expect(published).toEqual([]);
+  });
 });
 
 describe("leaveGame", () => {

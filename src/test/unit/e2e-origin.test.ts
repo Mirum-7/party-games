@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import config from "../../../playwright.config";
-import { APP_ORIGIN } from "@/test/e2e/helpers";
+import { APP_ORIGIN, DEFAULT_E2E_DATABASE_URL, resolveE2eDatabaseUrl } from "@/test/e2e/helpers";
 
 // Регрессия окружения WebKit E2E: production-cookie сессии Secure, а WebKit
 // (в отличие от Chromium) не отправляет Secure-cookie по http даже на
@@ -26,5 +26,37 @@ describe("E2E origin для браузерных тестов", () => {
 
   test("workers=1: партиционирование scenario IP в helpers рассчитано на одного worker", () => {
     expect(config.workers).toBe(1);
+  });
+});
+
+describe("E2E disposable database", () => {
+  test("default — одноразовая words_game_browser_e2e на 127.0.0.1:55432", () => {
+    const url = new URL(DEFAULT_E2E_DATABASE_URL);
+    expect(url.hostname).toBe("127.0.0.1");
+    expect(url.port).toBe("55432");
+    expect(url.pathname).toBe("/words_game_browser_e2e");
+    expect(url.pathname.endsWith("_e2e")).toBe(true);
+  });
+
+  test("playwright webServer использует тот же resolver URL, что и global-setup", () => {
+    const webServer = config.webServer as { env?: Record<string, string> };
+    expect(webServer.env?.DATABASE_URL).toBe(resolveE2eDatabaseUrl());
+  });
+
+  test("resolveE2eDatabaseUrl: env override побеждает default", () => {
+    const original = process.env.E2E_DATABASE_URL;
+    try {
+      process.env.E2E_DATABASE_URL = "postgresql://words:words@127.0.0.1:55432/parallel_agent_e2e";
+      expect(resolveE2eDatabaseUrl()).toBe(
+        "postgresql://words:words@127.0.0.1:55432/parallel_agent_e2e",
+      );
+    } finally {
+      if (original === undefined) {
+        delete process.env.E2E_DATABASE_URL;
+      } else {
+        process.env.E2E_DATABASE_URL = original;
+      }
+    }
+    expect(resolveE2eDatabaseUrl()).toBe(DEFAULT_E2E_DATABASE_URL);
   });
 });

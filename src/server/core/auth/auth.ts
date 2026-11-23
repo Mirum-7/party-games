@@ -3,9 +3,7 @@ import "server-only";
 import type { Game, Player, PrismaClient } from "@/generated/prisma/client";
 
 import { ApiError } from "@/server/http/errors";
-
-// Защита от некорректного UUID в cookie: fail-closed без обращения к БД.
-const UUID_PATTERN = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+import { isValidPlayerId } from "@/server/core/players/id";
 
 export type Membership = {
   player: Player;
@@ -24,7 +22,8 @@ export async function requireMembership(
   playerId: string | null,
   gameCode: string,
 ): Promise<Membership> {
-  if (playerId === null || !UUID_PATTERN.test(playerId)) {
+  // Fail-closed без обращения к БД: malformed UUID бросил бы P2007.
+  if (playerId === null || !isValidPlayerId(playerId)) {
     throw new ApiError("UNAUTHENTICATED", "Сессия отсутствует или недействительна");
   }
   const player = await db.player.findUnique({ where: { id: playerId } });

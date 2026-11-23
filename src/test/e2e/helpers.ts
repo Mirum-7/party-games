@@ -15,6 +15,18 @@ const e2ePort = process.env.E2E_PORT ?? "3100";
 export const APP_ORIGIN = `https://localhost:${e2ePort}`;
 export const API_PREFIX = "/api/v1/games";
 
+// Единый источник одноразовой E2E БД: default и env override читаются здесь,
+// playwright.config.ts (webServer.env.DATABASE_URL) и global-setup.ts
+// импортируют resolver, рассинхрон невозможен (регрессия:
+// src/test/unit/e2e-origin.test.ts). Безопасность суффикса `_e2e` проверяет
+// assertDisposableE2eDatabaseUrl в global-setup перед migrate deploy.
+export const DEFAULT_E2E_DATABASE_URL =
+  "postgresql://words:words@127.0.0.1:55432/words_game_browser_e2e";
+
+export function resolveE2eDatabaseUrl(): string {
+  return process.env.E2E_DATABASE_URL ?? DEFAULT_E2E_DATABASE_URL;
+}
+
 export const originHeaders = { origin: APP_ORIGIN };
 
 export type ErrorBody = {

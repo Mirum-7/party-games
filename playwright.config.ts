@@ -1,6 +1,6 @@
 import { defineConfig, devices } from "@playwright/test";
 
-import { APP_ORIGIN } from "./src/test/e2e/helpers";
+import { APP_ORIGIN, resolveE2eDatabaseUrl } from "./src/test/e2e/helpers";
 
 // E2E работает только против production-сервера на выделенном порту и
 // одноразовой БД с суффиксом _e2e (проверка в global-setup.ts). Порт
@@ -18,8 +18,7 @@ import { APP_ORIGIN } from "./src/test/e2e/helpers";
 // самоподписанному сертификату прокси; Secure-семантика cookie не меняется.
 const e2ePort = process.env.E2E_PORT ?? "3100";
 const e2eBackendPort = String(Number(e2ePort) + 100);
-const e2eDatabaseUrl =
-  process.env.E2E_DATABASE_URL ?? "postgresql://words:words@127.0.0.1:55432/words_game_api_e2e";
+const e2eDatabaseUrl = resolveE2eDatabaseUrl();
 
 // Отдельный тестовый секрет: ни production-, ни development-значение не
 // используются и в репозиторий не попадают.

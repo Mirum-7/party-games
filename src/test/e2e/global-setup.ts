@@ -3,6 +3,8 @@ import { resolve } from "node:path";
 
 import { Client } from "pg";
 
+import { resolveE2eDatabaseUrl } from "./helpers";
+
 // E2E работает только с одноразовой локальной БД, имя которой оканчивается
 // на _e2e. Проверка дублирует src/test/integration/database.ts, чтобы не
 // тянуть Prisma Client (путь "@/..." ) в окружение Playwright.
@@ -43,8 +45,7 @@ function migrateDeploy(databaseUrl: string): void {
 }
 
 async function globalSetup(): Promise<void> {
-  const databaseUrl =
-    process.env.E2E_DATABASE_URL ?? "postgresql://words:words@127.0.0.1:55432/words_game_api_e2e";
+  const databaseUrl = resolveE2eDatabaseUrl();
   assertDisposableE2eDatabaseUrl(databaseUrl);
   migrateDeploy(databaseUrl);
   await cleanDatabase(databaseUrl);

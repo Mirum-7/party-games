@@ -4,6 +4,7 @@ import type { GameRealtime } from "@/server/core/realtime/types";
 import { runGameCommand, requireHost, requireLobby, requireMember } from "@/server/core/games/command";
 import type { CommandResult } from "@/server/core/games/command";
 import { GameCommandError } from "@/server/core/games/errors";
+import { isValidPlayerId } from "@/server/core/players/id";
 import type { TransactionClient } from "@/server/db";
 
 // Каждый игрок управляет только собственной готовностью; повторное
@@ -48,6 +49,10 @@ export async function removePlayer(input: {
       requireLobby(game);
       if (input.targetPlayerId === input.actorPlayerId) {
         throw new GameCommandError("FORBIDDEN", 403, "Админ не может удалить сам себя");
+      }
+      // Fail-closed до Prisma: malformed-UUID бросил бы P2007 вместо 404.
+      if (!isValidPlayerId(input.targetPlayerId)) {
+        throw new GameCommandError("PLAYER_NOT_FOUND", 404, "Удаляемый участник не найден в комнате");
       }
       const target = await tx.player.findFirst({
         where: { id: input.targetPlayerId, gameId: game.id },

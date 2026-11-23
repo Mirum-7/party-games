@@ -1,5 +1,8 @@
 import { expect, test, type Browser, type Page } from "@playwright/test";
 
+import type { GameStateResponse } from "../../shared/contracts/game";
+import { API_PREFIX } from "./helpers";
+
 // Полный live-цикл WORD_CHAIN: ровно четыре независимых браузерных контекста
 // (Маша/Петя/Ваня/Саша). Создание → три входа → готовность → старт → слова →
 // автоматический PLAYING → персональные подсказки → последовательные
@@ -123,11 +126,28 @@ test("полный цикл WORD_CHAIN: четыре контекста от л�
     await expect(startButton).toBeVisible();
     await expect(sasha.page.getByRole("button", { name: "Начать игру" })).toHaveCount(0);
 
-    // 4. Админ запускает — все переходят к вводу слова.
+    // 4. Админ запускает — все переходят к вводу слова. Настройка по умолчанию
+    // (hideTargetNamesDuringSetup=false): автор видит имя своего адресата, и
+    // видимый заголовок обязан совпадать с авторизованным setup DTO зрителя.
     await startButton.click();
     for (const player of players) {
+      // Сначала дожидаемся экрана ввода слова (SSE-driven), затем сверяем
+      // видимый заголовок с авторизованным setup DTO зрителя: одноразовый
+      // fetch /state должен идти после перехода фазы, а не в гонке со стартом.
       await expect(
         player.page.getByRole("heading", { name: /Загадай слово/u }),
+      ).toBeVisible();
+      const stateResponse = await player.page.request.get(`${API_PREFIX}/${code}/state`);
+      expect(stateResponse.status(), `/state для ${player.name}`).toBe(200);
+      const viewerState = (await stateResponse.json()) as GameStateResponse;
+      expect(viewerState.setup?.targetHidden, `default: имена не скрыты (${player.name})`).toBe(
+        false,
+      );
+      const targetName = viewerState.setup?.target?.name;
+      expect(targetName, `адресат присутствует в setup DTO (${player.name})`).toBeTruthy();
+      await expect(
+        player.page.getByRole("heading", { name: `Загадай слово ${targetName}`, exact: true }),
+        `заголовок называет адресата из setup DTO (${player.name})`,
       ).toBeVisible();
     }
 

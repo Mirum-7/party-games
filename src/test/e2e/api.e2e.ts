@@ -641,6 +641,13 @@ test("DELETE /players/{playerId}: только админ, удалённый т
   );
   await expectApiError(missing, 404, "PLAYER_NOT_FOUND");
 
+  const malformed = await lobby.host.delete(`${API_PREFIX}/${lobby.code}/players/not-a-uuid`, {
+    headers: originHeaders,
+  });
+  await expectApiError(malformed, 404, "PLAYER_NOT_FOUND");
+  const afterMalformed = await getStateViaApi(lobby.host, lobby.code);
+  expect(afterMalformed.state.players).toHaveLength(3);
+
   const removed = await lobby.host.delete(`${API_PREFIX}/${lobby.code}/players/${lobby.thirdId}`, {
     headers: originHeaders,
   });
