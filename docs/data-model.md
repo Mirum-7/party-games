@@ -94,7 +94,7 @@ WordChainPhase:
 - `finishedAt IS NOT NULL` iff `place IS NOT NULL`;
 - `score > 0` iff `place IS NOT NULL`.
 
-Последние два правила закрепляются SQL CHECK в миграции. Для будущих игр с другой семантикой результатов допускается отдельная модульная таблица вместо изменения смысла существующих полей.
+Последние три правила закрепляются именованными SQL CHECK в миграции: `game_results_place_positive`, `game_results_place_time_pair`, `game_results_score_place_pair`. Имена и SQLSTATE зафиксированы `src/test/integration/schema.test.ts`, при будущих `migrate dev` ограничения сохраняются (порядок — в [development.md](development.md)). Для будущих игр с другой семантикой результатов допускается отдельная модульная таблица вместо изменения смысла существующих полей. Длина значения дополнительно ограничена типом колонки.
 
 ### WordChainGame
 
@@ -121,11 +121,11 @@ WordChainPhase:
 
 Ограничения:
 
-- `UNIQUE(gameId, authorPlayerId)`;
-- `UNIQUE(gameId, targetPlayerId)`;
-- SQL CHECK `authorPlayerId <> targetPlayerId`;
-- `word IS NOT NULL` iff `submittedAt IS NOT NULL`;
-- `word` после `trim` непустое и не длиннее 80 символов.
+- `UNIQUE(gameId, authorPlayerId)` и глобальный `@unique` по `authorPlayerId`;
+- `UNIQUE(gameId, targetPlayerId)` и глобальный `@unique` по `targetPlayerId`;
+- SQL CHECK `word_assignments_no_self_target`: `authorPlayerId <> targetPlayerId`;
+- `word_assignments_word_submission_pair`: `word IS NOT NULL` iff `submittedAt IS NOT NULL`;
+- `word_assignments_word_length`: `word` после `trim` непустое и не длиннее 80 символов; тип колонки `VARCHAR(80)` отсекает более длинные значения раньше CHECK.
 
 Сервис дополнительно гарантирует, что автор и адресат принадлежат `gameId`. Уникальности по отдельности не доказывают наличие одного цикла: это проверяет алгоритм и property-тесты.
 
