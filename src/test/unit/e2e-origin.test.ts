@@ -23,4 +23,8 @@ describe("E2E origin для браузерных тестов", () => {
     expect(webServer.url).toBe(APP_ORIGIN);
     expect(webServer.ignoreHTTPSErrors).toBe(true);
   });
+
+  test("workers=1: партиционирование scenario IP в helpers рассчитано на одного worker", () => {
+    expect(config.workers).toBe(1);
+  });
 });
