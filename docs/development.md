@@ -39,6 +39,7 @@ src/
 | `TRUST_PROXY` | Нет | `true` — доверять `X-Forwarded-For` при определении IP для rate limiting; по умолчанию заголовок игнорируется |
 | `TEST_DATABASE_URL` | Для integration-тестов | Одноразовая локальная БД, имя оканчивается на `_test` |
 | `E2E_DATABASE_URL` | Для E2E-тестов | Одноразовая локальная БД, имя оканчивается на `_e2e` |
+| `E2E_PORT` | Для E2E-тестов | Выделенный порт браузерного E2E; по умолчанию 3100. Внешний https-прокси слушает `https://localhost:<E2E_PORT>`, production-сервер Next стартует на заднем порту `<E2E_PORT> + 100` |
 | `NODE_ENV` | Управляется запуском | Режим production/development |
 
 Локальный `APP_ORIGIN`: `http://localhost:3000`. Секреты не получают префикс `NEXT_PUBLIC_` и не коммитятся. В репозиторий добавляется только `.env.example` с безопасными fictitious-значениями.
@@ -142,6 +143,20 @@ Integration- и E2E-тесты выполняются только против 
 Для проверки утечек недостаточно искать поле `word`: нужно сравнивать сериализованный ответ с фактическими секретными значениями, чтобы обнаружить их в неожиданном поле.
 
 ### E2E
+
+#### Транспорт браузерного E2E: production Next за тест-only TLS-прокси
+
+Браузерный трафик E2E идёт через `https://localhost:<E2E_PORT>`, а не напрямую по http. Причина: сессионная cookie в production-режиме `Secure` (`buildSessionOptions(password, NODE_ENV === "production")`), а WebKit не отправляет `Secure`-cookie по http даже на `localhost`/`127.0.0.1` (Chromium делает локальное исключение, WebKit — нет): cookie сохраняется, но не передаётся, и каждый браузерный сценарий падает на первом шаге. Реальный TLS полностью сохраняет семантику `Secure`-cookie и production-сервер Next.
+
+Организация (всё — только тестовое окружение, зависимостей не добавлено):
+
+- `src/test/e2e/tls-proxy.ts` — TLS-терминатор на `node:https`/`node:http` без буферизации, включая долгоживущий SSE-поток. Запускается как `webServer` Playwright: сам стартует `bun run start --port <E2E_PORT + 100>` (plain http на `127.0.0.1`), дожидается его и слушает `https://localhost:<E2E_PORT>`.
+- Сертификат самоподписанный (`CN=localhost`, SAN `localhost`/`127.0.0.1`), генерируется локально через `openssl` и кэшируется в `node_modules/.cache/words-game-e2e-tls/` (в git не попадает). Требуется доступный `openssl`.
+- Браузерные контексты и readiness-проверка `webServer` доверяют ему через `ignoreHTTPSErrors` только в `playwright.config.ts`; тестовый секрет, загаданные слова и поведение cookie не меняются.
+- `APP_ORIGIN` production-сервера в E2E — видимый браузеру origin `https://localhost:<E2E_PORT>` (проверка `Origin` мутаций сравнивает с ним). Единый источник origin — константа `APP_ORIGIN` в `src/test/e2e/helpers.ts`; конфигурация Playwright и SSE-тесты импортируют её, рассинхрон невозможен (регрессия: `src/test/unit/e2e-origin.test.ts`).
+- «Голые» HTTP-запросы из процесса тестов (живой SSE-поток в `sse.e2e.ts`) используют `e2eFetch`/`e2eFetchStream` из helpers: `node:https` с явным `rejectUnauthorized: false` только для этого прокси (`NODE_EXTRA_CA_CERTS` не подходит — рантайм читает его один раз при старте).
+
+#### Сценарии
 
 Обязательный сценарий использует четыре Playwright browser context, а не четыре вкладки с общей cookie:
 

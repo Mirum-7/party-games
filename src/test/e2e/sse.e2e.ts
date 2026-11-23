@@ -1,23 +1,25 @@
-import { expect, request, test, type APIRequestContext, type APIResponse } from "@playwright/test";
+import { expect, test, type APIRequestContext, type APIResponse } from "@playwright/test";
 
 import type { GameStateResponse } from "../../shared/contracts/game";
 import {
   API_PREFIX,
+  APP_ORIGIN,
   createGameViaApi,
+  e2eFetch,
+  e2eFetchStream,
   getStateViaApi,
   joinGameViaApi,
-  nextScenarioIp,
+  newScenarioContext,
   setCookieHeader,
   startPlaying,
   type ErrorBody,
 } from "./helpers";
 
-// Тот же источник порта, что и в playwright.config.ts (E2E_PORT, по умолчанию
-// 3100). Производственный сервер стартует на этом порту, поэтому живой поток
-// открывается именно здесь: если конфигурация порта сломана, поток не
-// откроется и тест упадёт, а не «пройдёт» против неправильного сервера.
-const e2ePort = process.env.E2E_PORT ?? "3100";
-const appOrigin = `http://127.0.0.1:${e2ePort}`;
+// Origin и порт — единый источник в helpers (APP_ORIGIN): если конфигурация
+// порта или схемы сломана, живой поток не откроется и тест упадёт, а не
+// «пройдёт» против неправильного сервера. Трафик идёт через тест-only
+// TLS-прокси (см. helpers.ts и playwright.config.ts).
+const appOrigin = APP_ORIGIN;
 const originHeaders = { origin: appOrigin };
 
 const REVISION_DATA_PATTERN = /^\{"revision":\d+\}$/;
@@ -33,20 +35,18 @@ type SseFrame = {
 };
 
 type EventStream = {
-  response: Response;
+  response: { status: number; headers: Headers };
   readFrame: (timeoutMs?: number) => Promise<SseFrame>;
   readRawText: () => string;
   close: () => Promise<void>;
 };
 
 // Playwright APIRequestContext не отдаёт инкрементальное тело потока, поэтому
-// живой SSE читается нативным fetch: реальные байты, точные заголовки, abort
-// для чистого закрытия. Cookie передаём вручную из Set-Cookie ответа создания.
+// живой SSE читается "голым" HTTP через e2eFetchStream: реальные байты, точные
+// заголовки, cancel для чистого закрытия. Cookie передаём вручную из
+// Set-Cookie ответа создания.
 function scenarioContext(): Promise<APIRequestContext> {
-  return request.newContext({
-    baseURL: appOrigin,
-    extraHTTPHeaders: { "x-forwarded-for": nextScenarioIp() },
-  });
+  return newScenarioContext();
 }
 
 function sessionCookieFrom(response: APIResponse): string {
@@ -82,16 +82,13 @@ type FrameWaiter = {
 };
 
 async function openEventStream(code: string, sessionCookie: string): Promise<EventStream> {
-  const controller = new AbortController();
-  const response = await fetch(`${appOrigin}${API_PREFIX}/${code}/events`, {
+  const stream = await e2eFetchStream(`${appOrigin}${API_PREFIX}/${code}/events`, {
     headers: { cookie: `wg_session=${sessionCookie}`, accept: "text/event-stream" },
-    signal: controller.signal,
   });
-  if (response.status !== 200 || response.body === null) {
-    throw new Error(`SSE-поток не открылся: HTTP ${response.status}`);
+  if (stream.status !== 200) {
+    throw new Error(`SSE-поток не открылся: HTTP ${stream.status}`);
   }
 
-  const reader = response.body.getReader();
   const decoder = new TextDecoder();
   const queue: SseFrame[] = [];
   const waiters: FrameWaiter[] = [];
@@ -119,12 +116,7 @@ async function openEventStream(code: string, sessionCookie: string): Promise<Eve
 
   const pump = (async (): Promise<void> => {
     try {
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) {
-          failWaiters(new Error("SSE-поток закрыт сервером"));
-          return;
-        }
+      for await (const value of stream.body) {
         const chunk = decoder.decode(value, { stream: true });
         rawText += chunk;
         buffer += chunk;
@@ -137,6 +129,7 @@ async function openEventStream(code: string, sessionCookie: string): Promise<Eve
         }
         notify();
       }
+      failWaiters(new Error("SSE-поток закрыт сервером"));
     } catch (error) {
       if (streamEnded === null) {
         failWaiters(error instanceof Error ? error : new Error(String(error)));
@@ -145,7 +138,7 @@ async function openEventStream(code: string, sessionCookie: string): Promise<Eve
   })();
 
   return {
-    response,
+    response: { status: stream.status, headers: stream.headers },
     readFrame: (timeoutMs = 10_000) =>
       new Promise<SseFrame>((resolve, reject) => {
         const frame = queue.shift();
@@ -166,16 +159,11 @@ async function openEventStream(code: string, sessionCookie: string): Promise<Eve
       }),
     readRawText: () => rawText,
     close: async () => {
-      controller.abort();
-      try {
-        await reader.cancel();
-      } catch {
-        // Поток уже отменён abort — повторный cancel безопасен.
-      }
+      stream.cancel();
       try {
         await pump;
       } catch {
-        // Pump завершается AbortError при закрытии.
+        // Pump завершается ошибкой уничтожения сокета при закрытии.
       }
     },
   };
@@ -258,7 +246,7 @@ test("GET /events без членства: обычный JSON 401/403 с no-sto
   const created = await createGameViaApi(ctx, "Маша");
   const code = created.state.game.code;
 
-  const anonymous = await fetch(`${appOrigin}${API_PREFIX}/${code}/events`);
+  const anonymous = await e2eFetch(`${appOrigin}${API_PREFIX}/${code}/events`);
   expect(anonymous.status).toBe(401);
   expect(anonymous.headers.get("content-type")).toContain("application/json");
   expect(anonymous.headers.get("cache-control")).toContain("no-store");
@@ -269,7 +257,7 @@ test("GET /events без членства: обычный JSON 401/403 с no-sto
 
   const outsider = await scenarioContext();
   const outsiderCreated = await createGameViaApi(outsider, "Петя");
-  const forbidden = await fetch(`${appOrigin}${API_PREFIX}/${code}/events`, {
+  const forbidden = await e2eFetch(`${appOrigin}${API_PREFIX}/${code}/events`, {
     headers: { cookie: `wg_session=${sessionCookieFrom(outsiderCreated.response)}` },
   });
   expect(forbidden.status).toBe(403);
@@ -279,7 +267,7 @@ test("GET /events без членства: обычный JSON 401/403 с no-sto
   expect(forbiddenBody.error.code).toBe("FORBIDDEN");
   expect(forbiddenBody.error.message.length).toBeGreaterThan(0);
 
-  const missing = await fetch(`${appOrigin}${API_PREFIX}/ZZZZZZ/events`, {
+  const missing = await e2eFetch(`${appOrigin}${API_PREFIX}/ZZZZZZ/events`, {
     headers: { cookie: `wg_session=${sessionCookieFrom(created.response)}` },
   });
   expect(missing.status).toBe(404);
