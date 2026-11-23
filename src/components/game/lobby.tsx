@@ -215,13 +215,16 @@ export function Lobby({
           <Button
             type="button"
             disabled={mutationPending || !canStart}
+            aria-describedby={startBlockReason !== null ? "start-block-reason" : undefined}
             onClick={() => void onStart()}
             className="min-h-11 w-full"
           >
             Начать игру
           </Button>
-          {startBlockReason ? (
-            <p className="text-sm text-muted-foreground">{startBlockReason}</p>
+          {startBlockReason !== null ? (
+            <p id="start-block-reason" className="text-sm text-muted-foreground">
+              {startBlockReason}
+            </p>
           ) : null}
         </div>
       ) : null}

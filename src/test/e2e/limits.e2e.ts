@@ -41,10 +41,13 @@ test("старт меньше трёх и без полной готовност
   try {
     const code = await createGameViaUi(mashaPage, "Маша");
     await joinViaUi(petePage, code, "Петя");
+    const startButton = mashaPage.getByRole("button", { name: "Начать игру" });
 
-    // Меньше трёх участников: кнопка запуска админа заблокирована с причиной.
-    await expect(mashaPage.getByRole("button", { name: "Начать игру" })).toBeVisible();
-    await expect(mashaPage.getByRole("button", { name: "Начать игру" })).toBeDisabled();
+    // Меньше трёх участников: кнопка запуска админа заблокирована с причиной,
+    // причина связана с кнопкой через aria-describedby.
+    await expect(startButton).toBeVisible();
+    await expect(startButton).toBeDisabled();
+    await expect(startButton).toHaveAccessibleDescription("Для старта нужно минимум 3 участника");
     await expect(mashaPage.getByText("Для старта нужно минимум 3 участника")).toBeVisible();
 
     const mashaApi = await apiAs(contexts[0]);
@@ -56,15 +59,17 @@ test("старт меньше трёх и без полной готовност
     await setReadyViaUi(mashaPage);
     await setReadyViaUi(petePage);
     await expect(mashaPage.getByText("Не все участники готовы")).toBeVisible();
-    await expect(mashaPage.getByRole("button", { name: "Начать игру" })).toBeDisabled();
+    await expect(startButton).toBeDisabled();
+    await expect(startButton).toHaveAccessibleDescription("Не все участники готовы");
 
     const notReady = await mashaApi.post(`${API_PREFIX}/${code}/start`, { headers: originHeaders });
     await expectApiError(notReady, 409, "NOT_ALL_READY");
 
-    // Все готовы: причина исчезла, кнопка активна.
+    // Все готовы: причина исчезла, кнопка активна, описание очищено.
     await setReadyViaUi(vanyaPage);
     await expect(mashaPage.getByText("Не все участники готовы")).toHaveCount(0);
-    await expect(mashaPage.getByRole("button", { name: "Начать игру" })).toBeEnabled();
+    await expect(startButton).toBeEnabled();
+    await expect(startButton).toHaveAccessibleDescription("");
 
     expect(consoleErrors).toEqual([]);
   } finally {

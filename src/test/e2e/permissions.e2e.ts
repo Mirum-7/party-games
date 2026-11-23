@@ -41,7 +41,7 @@ function expectUnchanged(before: RoomSnapshot, after: RoomSnapshot): void {
 
 test("не-админ: settings/start/remove/finish/cancel напрямую — 403, состояние комнаты неизменно", async () => {
   const lobby = await createLobbyOfThree();
-  const { host, second, third, code } = lobby;
+  const { host, second, code } = lobby;
   const base = await snapshotRoom(host, code);
 
   // Права в DTO не-админа отключены (UI по ним лишь скрывает контролы).
@@ -63,7 +63,7 @@ test("не-админ: settings/start/remove/finish/cancel напрямую — 
   const start = await second.post(`${API_PREFIX}/${code}/start`, { headers: originHeaders });
   await expectApiError(start, 403, "FORBIDDEN");
 
-  const remove = await second.delete(`${API_PREFIX}/${code}/players/${third}`, { headers: originHeaders });
+  const remove = await second.delete(`${API_PREFIX}/${code}/players/${lobby.thirdId}`, { headers: originHeaders });
   await expectApiError(remove, 403, "FORBIDDEN");
 
   const finish = await second.post(`${API_PREFIX}/${code}/finish`, { headers: originHeaders });
@@ -90,7 +90,7 @@ test("посторонний участник другой комнаты: вс�
   const start = await outsider.post(`${API_PREFIX}/${lobby.code}/start`, { headers: originHeaders });
   await expectApiError(start, 403, "FORBIDDEN");
 
-  const remove = await outsider.delete(`${API_PREFIX}/${lobby.code}/players/${lobby.second}`, {
+  const remove = await outsider.delete(`${API_PREFIX}/${lobby.code}/players/${lobby.secondId}`, {
     headers: originHeaders,
   });
   await expectApiError(remove, 403, "FORBIDDEN");
