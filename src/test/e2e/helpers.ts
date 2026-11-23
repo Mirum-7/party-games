@@ -1,11 +1,18 @@
-import { expect, request, type APIRequestContext, type APIResponse } from "@playwright/test";
+import { expect, request, test, type APIRequestContext, type APIResponse } from "@playwright/test";
+import { request as httpsRequest } from "node:https";
 
 import type { GameStateResponse } from "../../shared/contracts/game";
 
 // Тот же порт, что и в playwright.config.ts (E2E_PORT, по умолчанию 3100):
 // baseURL контекстов и Origin mutation должны совпадать с APP_ORIGIN сервера.
+// Origin единый источник — здесь; config и sse.e2e импортируют его отсюда.
+// Схема https: production-cookie сессии Secure, а WebKit не отправляет
+// Secure-cookie по http даже на localhost. Весь браузерный трафик идёт через
+// тест-only TLS-прокси (tls-proxy.ts) на https://localhost:<E2E_PORT>;
+// контексты Playwright доверяют его самоподписанному сертификату через
+// ignoreHTTPSErrors конфигурации (см. playwright.config.ts).
 const e2ePort = process.env.E2E_PORT ?? "3100";
-export const APP_ORIGIN = `http://127.0.0.1:${e2ePort}`;
+export const APP_ORIGIN = `https://localhost:${e2ePort}`;
 export const API_PREFIX = "/api/v1/games";
 
 export const originHeaders = { origin: APP_ORIGIN };
@@ -24,12 +31,31 @@ export type ErrorBody = {
 // x-forwarded-for и лимиты тестов не складываются. Только rate-limit тест
 // намеренно повторяет один IP. Счётчик держится на globalThis: Playwright
 // перевычисляет модуль теста между тестами, и модульное состояние сбрасывалось
-// бы, приводя к повторному использованию IP внутри одного прогона.
+// бы, приводя к повторному использованию IP внутри одного прогона. Проекты
+// (chromium/webkit) выполняются в разных worker-процессах с независимым
+// globalThis, поэтому начальное значение сидируется часами и смещается по
+// индексу проекта: диапазоны IP разных проектов не пересекаются в пределах
+// окна лимита (без смещения часы дают пересекающиеся диапазоны, и чужой
+// исчерпанный IP получает мгновенный 429). Расчёт на workers: 1 из
+// playwright.config.ts.
 type IpCounterGlobal = { __wordsGameE2eIpCounter?: number };
+
+function projectOffset(): number {
+  try {
+    const info = test.info();
+    const index = info.config.projects.findIndex((project) => project.name === info.project.name);
+    return Math.max(index, 0) * 50_000;
+  } catch {
+    return 0;
+  }
+}
 
 function nextIpValue(): number {
   const state = globalThis as IpCounterGlobal;
-  state.__wordsGameE2eIpCounter = (state.__wordsGameE2eIpCounter ?? 0) + 1;
+  if (state.__wordsGameE2eIpCounter === undefined) {
+    state.__wordsGameE2eIpCounter = Math.floor(Date.now() / 1000) + projectOffset();
+  }
+  state.__wordsGameE2eIpCounter += 1;
   return state.__wordsGameE2eIpCounter;
 }
 
@@ -42,6 +68,80 @@ export function newScenarioContext(ip: string = nextScenarioIp()): Promise<APIRe
   return request.newContext({
     baseURL: APP_ORIGIN,
     extraHTTPHeaders: { "x-forwarded-for": ip },
+    // Только для тестового самоподписанного сертификата TLS-прокси.
+    ignoreHTTPSErrors: true,
+  });
+}
+
+// --- Тест-only fetch поверх самоподписанного сертификата TLS-прокси ---------
+
+// Глобальный fetch рантайма (и APIRequestContext вне опций) не доверяет
+// самоподписанному сертификату прокси, а NODE_EXTRA_CA_CERTS читается рантаймом
+// один раз при старте. Тесты, которым нужен "голый" HTTP (живой SSE-поток),
+// используют эти обёртки: проверка сертификата отключена явно и только здесь.
+export type E2eResponse = {
+  status: number;
+  headers: Headers;
+  json: () => Promise<unknown>;
+  text: () => Promise<string>;
+};
+
+export type E2eStreamResponse = {
+  status: number;
+  headers: Headers;
+  body: AsyncGenerator<Uint8Array, void, void>;
+  cancel: () => void;
+};
+
+function responseHeaders(raw: Record<string, unknown>): Headers {
+  const flat: Record<string, string> = {};
+  for (const [name, value] of Object.entries(raw)) {
+    if (typeof value === "string") flat[name] = value;
+  }
+  return new Headers(flat);
+}
+
+export function e2eFetch(url: string, options: { headers?: Record<string, string> } = {}): Promise<E2eResponse> {
+  return new Promise((resolve, reject) => {
+    const req = httpsRequest(url, { method: "GET", headers: options.headers, rejectUnauthorized: false }, (res) => {
+      const chunks: Buffer[] = [];
+      res.on("data", (chunk: Buffer) => chunks.push(chunk));
+      res.on("end", () => {
+        const body = Buffer.concat(chunks).toString("utf8");
+        resolve({
+          status: res.statusCode ?? 0,
+          headers: responseHeaders(res.headers),
+          json: () => Promise.resolve(JSON.parse(body) as unknown),
+          text: () => Promise.resolve(body),
+        });
+      });
+    });
+    req.on("error", reject);
+    req.end();
+  });
+}
+
+export function e2eFetchStream(url: string, options: { headers?: Record<string, string> } = {}): Promise<E2eStreamResponse> {
+  return new Promise((resolve, reject) => {
+    const req = httpsRequest(url, { method: "GET", headers: options.headers, rejectUnauthorized: false }, (res) => {
+      async function* iterate(): AsyncGenerator<Uint8Array, void, void> {
+        try {
+          for await (const chunk of res) {
+            yield chunk as Uint8Array;
+          }
+        } finally {
+          req.destroy();
+        }
+      }
+      resolve({
+        status: res.statusCode ?? 0,
+        headers: responseHeaders(res.headers),
+        body: iterate(),
+        cancel: () => req.destroy(),
+      });
+    });
+    req.on("error", reject);
+    req.end();
   });
 }
 
