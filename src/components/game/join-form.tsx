@@ -16,13 +16,15 @@ export function normalizeInviteCode(value: string): string {
 export type JoinFormProps = {
   onJoin: (name: string, code: string) => Promise<void>;
   pending?: boolean;
+  // Начальное значение кода: форма на странице комнаты предзаполнена из адреса.
+  initialCode?: string;
 };
 
 // Переиспользуемая форма входа по коду приглашения: на домашней странице и
 // позже на серверной странице комнаты. Новое устройство всегда вводит имя.
-export function JoinForm({ onJoin, pending = false }: JoinFormProps) {
+export function JoinForm({ onJoin, pending = false, initialCode = "" }: JoinFormProps) {
   const [name, setName] = React.useState("");
-  const [code, setCode] = React.useState("");
+  const [code, setCode] = React.useState(initialCode);
   const [error, setError] = React.useState<string | null>(null);
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {

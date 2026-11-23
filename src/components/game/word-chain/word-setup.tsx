@@ -33,8 +33,21 @@ export type WordSetupProps = {
 
 export function WordSetup({ state, mutationPending, onSubmitWord, onCancel }: WordSetupProps) {
   const { game, players, viewer, setup, capabilities } = state;
-  const [word, setWord] = React.useState(setup?.word ?? "");
+  const savedWord = setup?.word ?? null;
+  const [word, setWord] = React.useState(savedWord ?? "");
   const [error, setError] = React.useState<string | null>(null);
+  const lastSavedWord = React.useRef(savedWord);
+
+  // Сервер — источник истины сохранённого слова: ответ мутации приходит уже
+  // нормализованным, поэтому после сохранения поле синхронизируется с DTO.
+  // Пока серверное значение не менялось, введённый локально черновик
+  // не затирается.
+  React.useEffect(() => {
+    if (savedWord !== lastSavedWord.current) {
+      lastSavedWord.current = savedWord;
+      setWord(savedWord ?? "");
+    }
+  }, [savedWord]);
 
   const inputDisabled = mutationPending || !capabilities.canSubmitWord;
 

@@ -4,8 +4,9 @@ import { renderToString } from "react-dom/server";
 import { getStartBlockReason, Lobby } from "@/components/game/lobby";
 import type { GameStateResponse } from "@/shared/contracts/game";
 
-// Фокусные SSR-тесты разметки лобби и чистых хелперов. Они не доказывают
-// работу кликов, диалогов в браузере или SSE — live E2E отложен до интеграции.
+// Фокусные SSR-тесты разметки лобби и чистых хелперов. Индикатор соединения
+// и баннер ошибок рисует оболочка GameRoomView (см. game-room.test.tsx);
+// клики и диалоги доказываются browser E2E.
 
 let seq = 0;
 function player(
@@ -66,12 +67,7 @@ const callbacks = {
 
 function renderLobby(state: GameStateResponse, mutationPending = false) {
   return renderToString(
-    <Lobby
-      state={state}
-      connectionStatus="connected"
-      mutationPending={mutationPending}
-      {...callbacks}
-    />,
+    <Lobby state={state} mutationPending={mutationPending} {...callbacks} />,
   );
 }
 
@@ -212,17 +208,6 @@ describe("Lobby", () => {
       true,
     );
     expect(html.match(/disabled=""/g)?.length).toBeGreaterThanOrEqual(4);
-  });
-
-  test("статус подключения показан ненавязчиво", () => {
-    const html = renderLobby(
-      makeState([
-        player("Маша", { isHost: true }),
-        player("Петя"),
-        player("Оля"),
-      ]),
-    );
-    expect(html).toContain("Подключено");
   });
 
   test("контролы имеют touch-таргет не менее 44px", () => {

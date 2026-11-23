@@ -2,12 +2,11 @@ import { describe, expect, test } from "bun:test";
 import { renderToString } from "react-dom/server";
 
 import { ConnectionIndicator } from "@/components/game/connection-indicator";
-import { Lobby } from "@/components/game/lobby";
 import type { ConnectionStatus } from "@/components/game/sync-reducer";
 import type { GameStateResponse } from "@/shared/contracts/game";
 
 // Регрессия: канонический ConnectionStatus из sync-reducer должен
-// приниматься индикатором и пропсами лобби целиком, с русской копией.
+// приниматься индикатором и оболочкой GameRoomView целиком, с русской копией.
 
 const STATUSES: Array<{ status: ConnectionStatus; label: string }> = [
   { status: "connecting", label: "Подключение…" },
@@ -51,14 +50,6 @@ function makeState(): GameStateResponse {
   };
 }
 
-const callbacks = {
-  onToggleReady: () => Promise.resolve(),
-  onUpdateSettings: () => Promise.resolve(),
-  onStart: () => Promise.resolve(),
-  onRemove: () => Promise.resolve(),
-  onLeave: () => Promise.resolve(),
-};
-
 describe("ConnectionIndicator с каноническим ConnectionStatus", () => {
   for (const { status, label } of STATUSES) {
     test(`рендерит «${label}» для статуса ${status}`, () => {
@@ -68,18 +59,29 @@ describe("ConnectionIndicator с каноническим ConnectionStatus", () 
   }
 });
 
-describe("Lobby принимает каждый канонический статус", () => {
-  for (const { status } of STATUSES) {
-    test(`принимает connectionStatus=${status}`, () => {
+describe("GameRoomView принимает каждый канонический статус", () => {
+  for (const { status, label } of STATUSES) {
+    test(`показывает «${label}» для статуса ${status}`, async () => {
+      const { GameRoomView } = await import("@/components/game/game-room");
       const html = renderToString(
-        <Lobby
-          state={makeState()}
+        <GameRoomView
+          game={makeState()}
           connectionStatus={status}
           mutationPending={false}
-          {...callbacks}
+          errorMessage={null}
+          refresh={() => Promise.resolve()}
+          onToggleReady={() => Promise.resolve()}
+          onUpdateSettings={() => Promise.resolve()}
+          onStart={() => Promise.resolve()}
+          onRemove={() => Promise.resolve()}
+          onLeave={() => Promise.resolve()}
+          onSubmitWord={() => Promise.resolve()}
+          onCancel={() => Promise.resolve()}
+          onGuessed={() => Promise.resolve()}
+          onFinish={() => Promise.resolve()}
         />,
       );
-      expect(html).toContain("Лобби");
+      expect(html).toContain(label);
     });
   }
 });

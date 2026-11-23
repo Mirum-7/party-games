@@ -20,20 +20,16 @@ import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
-import {
-  ConnectionIndicator,
-  type ConnectionStatus,
-} from "@/components/game/connection-indicator";import type {
+import type {
   GameStateResponse,
   PlayerSummary,
   UpdateSettingsRequest,
 } from "@/shared/contracts/game";
 
-// Узкий контракт для будущей интеграции с хуком GameRoom: все действия
-// остаются серверно-авторизованными, capabilities лишь скрывают контролы.
+// Узкий контракт для интеграции с GameRoom: индикатор соединения и баннер
+// ошибок рисует оболочка GameRoomView; здесь только действия лобби.
 export type LobbyProps = {
   state: GameStateResponse;
-  connectionStatus: ConnectionStatus;
   mutationPending: boolean;
   onToggleReady: (ready: boolean) => Promise<void>;
   onUpdateSettings: (settings: UpdateSettingsRequest) => Promise<void>;
@@ -123,7 +119,6 @@ function ConfirmDialog({
 
 export function Lobby({
   state,
-  connectionStatus,
   mutationPending,
   onToggleReady,
   onUpdateSettings,
@@ -140,7 +135,6 @@ export function Lobby({
     <div className="mx-auto flex w-full max-w-md flex-col gap-4">
       <header className="flex items-center justify-between gap-2">
         <h1 className="text-xl font-semibold tracking-tight">Лобби</h1>
-        <ConnectionIndicator status={connectionStatus} />
       </header>
 
       <Card>
