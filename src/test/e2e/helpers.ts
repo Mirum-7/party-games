@@ -2,7 +2,10 @@ import { expect, request, type APIRequestContext, type APIResponse } from "@play
 
 import type { GameStateResponse } from "../../shared/contracts/game";
 
-export const APP_ORIGIN = "http://127.0.0.1:3100";
+// Тот же порт, что и в playwright.config.ts (E2E_PORT, по умолчанию 3100):
+// baseURL контекстов и Origin mutation должны совпадать с APP_ORIGIN сервера.
+const e2ePort = process.env.E2E_PORT ?? "3100";
+export const APP_ORIGIN = `http://127.0.0.1:${e2ePort}`;
 export const API_PREFIX = "/api/v1/games";
 
 export const originHeaders = { origin: APP_ORIGIN };
