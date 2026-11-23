@@ -23,8 +23,7 @@ import { cn } from "@/lib/utils";
 import {
   ConnectionIndicator,
   type ConnectionStatus,
-} from "@/components/game/connection-indicator";
-import type {
+} from "@/components/game/connection-indicator";import type {
   GameStateResponse,
   PlayerSummary,
   UpdateSettingsRequest,

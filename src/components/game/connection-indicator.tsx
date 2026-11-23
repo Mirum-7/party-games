@@ -1,13 +1,14 @@
 "use client";
 
 import { Badge } from "@/components/ui/badge";
+import type { ConnectionStatus } from "@/components/game/sync-reducer";
 
-export type ConnectionStatus = "connected" | "reconnecting" | "disconnected";
+export type { ConnectionStatus };
 
 const STATUS_META: Record<ConnectionStatus, { label: string; variant: "default" | "secondary" | "destructive" }> = {
+  connecting: { label: "Подключение…", variant: "default" },
   connected: { label: "Подключено", variant: "secondary" },
   reconnecting: { label: "Переподключение…", variant: "default" },
-  disconnected: { label: "Нет соединения", variant: "destructive" },
 };
 
 // Ненавязчивый индикатор состояния синхронизации; не блокирует интерфейс.
