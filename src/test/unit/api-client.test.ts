@@ -2,7 +2,9 @@ import { describe, expect, test } from "bun:test";
 
 import {
   ApiClientError,
+  createGame,
   getGameState,
+  joinGame,
   leaveGame,
   sendGameMutation,
   type SyncFetch,
@@ -243,5 +245,43 @@ describe("leaveGame", () => {
     expect(error).toBeInstanceOf(ApiClientError);
     expect(error.code).toBe("GAME_NOT_FOUND");
     expect(error.status).toBe(404);
+  });
+});
+
+describe("createGame / joinGame", () => {
+  test("createGame шлёт POST /games с именем и WORD_CHAIN по умолчанию", async () => {
+    const { calls, fetcher, pending } = createFakeFetch();
+    const request = createGame("Маша", { fetcher });
+    pending[0]!.resolve(jsonResponse(201, makeGameState(1)));
+
+    await expect(request).resolves.toBe("K7Q2");
+    expect(calls[0]!.input).toBe("/api/v1/games");
+    expect(calls[0]!.init?.method).toBe("POST");
+    expect(JSON.parse(calls[0]!.init?.body as string)).toEqual({ name: "Маша", gameType: "WORD_CHAIN" });
+  });
+
+  test("createGame маппит серверные fieldErrors в ApiClientError", async () => {
+    const { fetcher, pending } = createFakeFetch();
+    const request = createGame("", { fetcher });
+    pending[0]!.resolve(
+      jsonResponse(422, {
+        error: { code: "VALIDATION_FAILED", message: "Проверьте поля", fieldErrors: { name: ["Введите имя"] } },
+      }),
+    );
+
+    const error = (await request.catch((cause: unknown) => cause)) as ApiClientError;
+    expect(error).toBeInstanceOf(ApiClientError);
+    expect(error.code).toBe("VALIDATION_FAILED");
+    expect(error.fieldErrors?.name).toEqual(["Введите имя"]);
+  });
+
+  test("joinGame шлёт POST /games/{code}/join, нормализуя код, не теряя имя", async () => {
+    const { calls, fetcher, pending } = createFakeFetch();
+    const request = joinGame(" k7 q2mn ", "Петя", { fetcher });
+    pending[0]!.resolve(jsonResponse(200, makeGameState(2)));
+
+    await expect(request).resolves.toBeUndefined();
+    expect(calls[0]!.input).toBe("/api/v1/games/K7Q2MN/join");
+    expect(JSON.parse(calls[0]!.init?.body as string)).toEqual({ name: "Петя" });
   });
 });
