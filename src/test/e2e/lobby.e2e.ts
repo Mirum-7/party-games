@@ -100,6 +100,36 @@ test("лобби: вход по коду, синхронизация готов�
   }
 });
 
+test("лобби: кнопка копирования записывает только код комнаты", async ({ browser }) => {
+  const consoleErrors: string[] = [];
+  const context = await browser.newContext();
+  await context.addInitScript(() => {
+    Object.defineProperty(navigator, "share", { configurable: true, value: undefined });
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: {
+        writeText: (text: string) => {
+          document.documentElement.dataset.copiedText = text;
+          return Promise.resolve();
+        },
+      },
+    });
+  });
+  const page = await context.newPage();
+  watchConsole(page, consoleErrors);
+
+  try {
+    const code = await createGameViaUi(page, "Маша");
+    await page.getByRole("button", { name: "Скопировать приглашение" }).click();
+
+    await expect(page.locator("html")).toHaveAttribute("data-copied-text", code);
+    await expect(page.getByRole("button", { name: "Скопировано" })).toBeVisible();
+    expect(consoleErrors).toEqual([]);
+  } finally {
+    await context.close();
+  }
+});
+
 test("лобби: отказ доступа к буферу обмена показывает ошибку без исключения", async ({
   browser,
 }) => {

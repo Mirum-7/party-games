@@ -66,7 +66,7 @@ function InviteShareButton({ code }: { code: string }) {
       }
     }
     try {
-      await navigator.clipboard.writeText(text);
+      await navigator.clipboard.writeText(code);
       setCopied(true);
     } catch {
       setCopied(false);
