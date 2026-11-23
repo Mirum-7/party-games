@@ -47,8 +47,8 @@ export function HomeForms({ onCreate, onJoin }: HomeFormsProps) {
     setJoinPending(true);
     try {
       await onJoin(name, code);
-    } catch {
-      // JoinForm уже показал сообщение об ошибке.
+    } finally {
+      // Ошибку показывает JoinForm: проброс нужен, чтобы его catch сработал.
       setJoinPending(false);
     }
   }
