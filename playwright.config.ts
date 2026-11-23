@@ -1,8 +1,11 @@
 import { defineConfig, devices } from "@playwright/test";
 
 // E2E работает только против production-сервера на выделенном порту и
-// одноразовой БД с суффиксом _e2e (проверка в global-setup.ts).
-const appOrigin = "http://127.0.0.1:3100";
+// одноразовой БД с суффиксом _e2e (проверка в global-setup.ts). Порт
+// выделяется через E2E_PORT: параллельные агенты используют разные порты,
+// поведение по умолчанию (3100) не меняется.
+const e2ePort = process.env.E2E_PORT ?? "3100";
+const appOrigin = `http://127.0.0.1:${e2ePort}`;
 const e2eDatabaseUrl =
   process.env.E2E_DATABASE_URL ?? "postgresql://words:words@127.0.0.1:55432/words_game_api_e2e";
 
@@ -26,7 +29,7 @@ export default defineConfig({
     { name: "webkit", use: { ...devices["Desktop Safari"] } },
   ],
   webServer: {
-    command: "bun run build && bun run start --port 3100",
+    command: `bun run build && bun run start --port ${e2ePort}`,
     url: appOrigin,
     reuseExistingServer: false,
     timeout: 300_000,
